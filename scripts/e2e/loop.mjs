@@ -64,8 +64,10 @@ function ensureFixture() {
 }
 
 async function main() {
-  step("setup", "app up + fixture repo with main(base) and review/target");
-  assert.ok(sok("window.list").ok, `app not reachable via ${SOK}`);
+  step("setup", "app up (via the always-present control plane) + fixture repo with main(base) and review/target");
+  // Target the control plane (main) for every global op — a bare command routes to a sticky
+  // "focused" window that may be gone/wrong on a cold boot. main always exists.
+  assert.ok(sok("window.list", undefined, { window: "main" }).ok, `app not reachable via ${SOK}`);
   ensureFixture();
   // git pre-clean: main back to base, worktree reclaimed. Force-checkout tolerates a dirty main
   // left by an interrupted run; the worktree remove/prune pair reclaims a stale or crashed worktree.
@@ -74,11 +76,23 @@ async function main() {
   git(["worktree", "remove", "--force", WT]);
   git(["worktree", "prune"]);
 
-  step("worktree", "check out review/target in its own worktree, open it as a window");
+  step("worktree", "check out review/target in its own worktree, open + resolve its window");
   assert.equal(git(["worktree", "add", "-q", WT, TARGET]).status, 0, "worktree add failed");
-  const wo = sok("window.open", { root: WT });
-  const win = wo.data.label || wo.data.existingWindow;
-  assert.ok(win, "no worktree window");
+  sok("window.open", { root: WT }, { window: "main" }); // control plane routes to / focuses the hosting window
+  // Resolve the hosting window from the authoritative project→window map, not window.open's return,
+  // and poll — on a cold boot the freshly-created window may still be booting.
+  let win = null;
+  for (let i = 0; i < 40 && !win; i++) {
+    const projects = sok("window.projects", undefined, { window: "main" }).data?.projects || [];
+    win = projects.find((p) => p.root === WT)?.window || null;
+    if (!win) await sleep(500);
+  }
+  assert.ok(win && win.startsWith("w-"), "no workspace window hosts the worktree (cold-boot self-sufficiency)");
+  for (let i = 0; i < 40; i++) {
+    const pl = sok("plugin.list", undefined, { window: win });
+    if (pl.ok && (pl.data?.plugins || []).some((p) => p.id === "soksak-plugin-git-review" && p.status === "enabled")) break;
+    await sleep(500);
+  }
 
   step("pre-clean", "resolve any leftover open comments for the target (idempotent)");
   for (const c of sok(`${PLUGIN}.comment.list`, { target: TARGET, status: "open" }, { window: win }).data.comments || []) {
@@ -100,6 +114,11 @@ async function main() {
 
   const tree = sok("ui.tree", undefined, { window: win });
   const addrs = (tree.data.nodes || tree.data || []).map((n) => n.address || n);
+  // Guard the targeting: ui.tree must have returned this window's nodes (not the control plane's).
+  assert.ok(
+    addrs.some((a) => typeof a === "string" && a.startsWith(`win/${win}/`)),
+    `ui.tree did not target the worktree window ${win} (got: ${[...new Set(addrs.map((a) => String(a).split("/")[1]))].join(",")})`,
+  );
   const refresh = addrs.find((a) => typeof a === "string" && a.endsWith("/node/refresh"));
   const fileNode = addrs.find((a) => typeof a === "string" && a.includes("/node/file/"));
   assert.ok(refresh, "no refresh node");
