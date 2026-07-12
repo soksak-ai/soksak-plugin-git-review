@@ -95,6 +95,15 @@ test("comment.resolve / reopen — status transitions, NOT_FOUND for a stranger"
   assert.equal((await cmd("comment.resolve")({ id: "nope" })).code, "NOT_FOUND");
 });
 
+test("comment.remove — permanently deletes the record, idempotent", async () => {
+  const { m, cmd } = boot();
+  const added = await cmd("comment.add")({ target: "a", body: "x" });
+  assert.equal((await q(m, "comment")).length, 1);
+  assert.equal((await cmd("comment.remove")({ id: added.id })).removed, true);
+  assert.equal((await q(m, "comment")).length, 0);
+  assert.equal((await cmd("comment.remove")({ id: added.id })).removed, false); // idempotent no-op
+});
+
 test("comment.send — injects the deterministic payload into the explicit pane", async () => {
   const { terminalCalls, cmd } = boot();
   await cmd("comment.add")({ target: "feat/x", file: "src/a.ts", line: 12, body: "fix this" });

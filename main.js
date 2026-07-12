@@ -355,6 +355,16 @@ var index_default = {
       message: (d) => msg(`Reopened ${d.id}`, `\uCF54\uBA58\uD2B8 ${d.id} \uC7AC\uAC1C`),
       handler: (p) => setStatus(p.id, "open")
     });
+    reg("comment.remove", {
+      danger: "destructive",
+      description: "Permanently delete a comment record. Idempotent \u2014 removing an absent comment reports removed:false.",
+      triggers: { ko: "\uCF54\uBA58\uD2B8 \uC0AD\uC81C \uC81C\uAC70 \uC601\uAD6C" },
+      params: { id: { type: "string", description: "Comment id", required: true } },
+      returns: "{ id, removed }",
+      examples: [`sok plugin.soksak-plugin-git-review.comment.remove '{"id":"<id>"}'`],
+      message: (d) => d.removed ? msg(`Removed ${d.id}`, `\uCF54\uBA58\uD2B8 ${d.id} \uC0AD\uC81C`) : msg(`No comment ${d.id}`, `\uCF54\uBA58\uD2B8 ${d.id} \uC5C6\uC74C`),
+      handler: async (p) => ({ id: String(p.id), removed: await app.data.delete(COLL_COMMENT, String(p.id), { scope: SCOPE }) })
+    });
     reg("comment.send", {
       description: "Inject a target's open comments into a terminal pane as a deterministic payload (each line prefixed '# ', shell-safe). The pane is given explicitly \u2014 this is the review\u2192agent return path. Verified by the injected text appearing in that pane's buffer.",
       triggers: { ko: "\uCF54\uBA58\uD2B8 \uD130\uBBF8\uB110 \uC804\uC1A1 \uC8FC\uC785 \uD68C\uADC0 \uC5D0\uC774\uC804\uD2B8" },

@@ -37,6 +37,8 @@ function sok(cmd, params, opts = {}) {
 const git = (args, cwd = REPO) => spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
 const step = (n, s) => console.log(`\n[${n}] ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const uiTreeAddrs = (tree) =>
+  ((tree.data?.nodes || tree.data || []).map((n) => (typeof n === "string" ? n : n.address))).filter((a) => typeof a === "string");
 
 function ensureFixture() {
   if (!existsSync(join(REPO, ".git"))) {
@@ -94,14 +96,21 @@ async function main() {
     await sleep(500);
   }
 
-  step("pre-clean", "resolve any leftover open comments for the target (idempotent)");
-  for (const c of sok(`${PLUGIN}.comment.list`, { target: TARGET, status: "open" }, { window: win }).data.comments || []) {
-    sok(`${PLUGIN}.comment.resolve`, { id: c.id }, { window: win });
+  step("pre-clean", "purge the target's comment store + assert the fixture diff is non-empty");
+  // Purge every comment for the target (not just open) — the store persists across runs (app.data),
+  // and accumulation would make list counts non-deterministic and mask a poisoned fixture.
+  for (const c of sok(`${PLUGIN}.comment.list`, { target: TARGET }, { window: win }).data.comments || []) {
+    sok(`${PLUGIN}.comment.remove`, { id: c.id }, { window: win });
   }
+  assert.equal((sok(`${PLUGIN}.comment.list`, { target: TARGET }, { window: win }).data.comments || []).length, 0, "comment store not purged");
+  // Precondition (false-pass guard): after the fixture reset the target MUST differ from base. An
+  // empty diff here means a poisoned fixture (a prior run's merge left main ahead), not a pass — die loud.
+  const pre = sok(`${PLUGIN}.diff.files`, { target: TARGET, path: REPO }, { window: win });
+  assert.ok(pre.ok && (pre.data.files || []).length >= 2, `fixture diff empty (poisoned) — target has no changes vs base: ${JSON.stringify(pre.data)}`);
 
   step("view", "open the Review view in the worktree window");
   sok("plugin.view.open", { view: "soksak-plugin-git-review.view", placement: "content" }, { window: win });
-  await sleep(1200);
+  await sleep(800);
 
   // ── GATE ① diff surface ─────────────────────────────────────────────────────
   step("①.diff", "diff.files/read return the target's changes; the view exposes file nodes");
@@ -112,18 +121,21 @@ async function main() {
   const read = sok(`${PLUGIN}.diff.read`, { target: TARGET, file: "feature.txt", path: REPO }, { window: win });
   assert.ok(read.data.diff.includes("new feature"), "diff.read missing hunk");
 
-  const tree = sok("ui.tree", undefined, { window: win });
-  const addrs = (tree.data.nodes || tree.data || []).map((n) => n.address || n);
-  // Guard the targeting: ui.tree must have returned this window's nodes (not the control plane's).
+  // Force a fresh view render: the harness changes git externally (spawnSync), which does not fire
+  // the command.finished event a real terminal commit would, so an already-open view can be stale.
+  // Click the (always-present) refresh node, then read the file nodes.
+  let addrs = uiTreeAddrs(sok("ui.tree", undefined, { window: win }));
   assert.ok(
-    addrs.some((a) => typeof a === "string" && a.startsWith(`win/${win}/`)),
-    `ui.tree did not target the worktree window ${win} (got: ${[...new Set(addrs.map((a) => String(a).split("/")[1]))].join(",")})`,
+    addrs.some((a) => a.startsWith(`win/${win}/`)),
+    `ui.tree did not target the worktree window ${win} (got: ${[...new Set(addrs.map((a) => a.split("/")[1]))].join(",")})`,
   );
-  const refresh = addrs.find((a) => typeof a === "string" && a.endsWith("/node/refresh"));
-  const fileNode = addrs.find((a) => typeof a === "string" && a.includes("/node/file/"));
+  const refresh = addrs.find((a) => a.endsWith("/node/refresh") && a.includes("git-review"));
   assert.ok(refresh, "no refresh node");
-  assert.ok(fileNode, `no file node. git-review addrs:\n${addrs.filter((a) => String(a).includes("git-review")).join("\n")}`);
   assert.ok(sok("ui.input.click", { address: refresh }, { window: win }).ok, "refresh click failed");
+  await sleep(1200);
+  addrs = uiTreeAddrs(sok("ui.tree", undefined, { window: win }));
+  const fileNode = addrs.find((a) => a.includes("/node/file/"));
+  assert.ok(fileNode, `no file node after refresh. git-review addrs:\n${addrs.filter((a) => a.includes("git-review")).join("\n")}`);
 
   // ── GATE ② comment CRUD (record contract) ───────────────────────────────────
   step("②.comment", "comment add/list/resolve; the record carries the contract fields");

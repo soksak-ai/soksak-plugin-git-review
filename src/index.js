@@ -178,6 +178,16 @@ const index_default = {
       message: (d) => msg(`Reopened ${d.id}`, `코멘트 ${d.id} 재개`),
       handler: (p) => setStatus(p.id, "open"),
     });
+    reg("comment.remove", {
+      danger: "destructive",
+      description: "Permanently delete a comment record. Idempotent — removing an absent comment reports removed:false.",
+      triggers: { ko: "코멘트 삭제 제거 영구" },
+      params: { id: { type: "string", description: "Comment id", required: true } },
+      returns: "{ id, removed }",
+      examples: ['sok plugin.soksak-plugin-git-review.comment.remove \'{"id":"<id>"}\''],
+      message: (d) => (d.removed ? msg(`Removed ${d.id}`, `코멘트 ${d.id} 삭제`) : msg(`No comment ${d.id}`, `코멘트 ${d.id} 없음`)),
+      handler: async (p) => ({ id: String(p.id), removed: await app.data.delete(COLL_COMMENT, String(p.id), { scope: SCOPE }) }),
+    });
 
     // ── comment.send — inject a target's open comments into a terminal pane ──────
     reg("comment.send", {

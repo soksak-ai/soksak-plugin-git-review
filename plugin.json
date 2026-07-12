@@ -66,6 +66,14 @@
         }
       },
       {
+        "name": "comment.remove",
+        "title": {
+          "en": "Remove a comment",
+          "ko": "코멘트 삭제"
+        },
+        "danger": "destructive"
+      },
+      {
         "name": "comment.send",
         "title": {
           "en": "Send comments to the target terminal",
