@@ -18,6 +18,7 @@
     "commands:destructive",
     "process",
     "data",
+    "terminal",
     "terminal:write"
   ],
   "contributes": {
