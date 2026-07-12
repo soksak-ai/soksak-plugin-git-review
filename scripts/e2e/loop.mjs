@@ -47,6 +47,11 @@ function ensureFixture() {
     git(["commit", "-q", "-m", "init"]);
     git(["tag", "base"]);
   }
+  // defensive: the base tag must exist for the idempotent reset (a pre-existing repo may lack it).
+  if (git(["rev-parse", "-q", "--verify", "refs/tags/base"]).status !== 0) {
+    const rootCommit = git(["rev-list", "--max-parents=0", "HEAD"]).stdout.trim();
+    if (rootCommit) git(["tag", "base", rootCommit]);
+  }
   // ensure review/target exists with a change diverged from base
   if (git(["show-ref", "--verify", "--quiet", `refs/heads/${TARGET}`]).status !== 0) {
     git(["checkout", "-q", "-b", TARGET, "base"]);
@@ -62,8 +67,9 @@ async function main() {
   step("setup", "app up + fixture repo with main(base) and review/target");
   assert.ok(sok("window.list").ok, `app not reachable via ${SOK}`);
   ensureFixture();
-  // git pre-clean: main back to base, worktree reclaimed
-  git(["checkout", "-q", "main"]);
+  // git pre-clean: main back to base, worktree reclaimed. Force-checkout tolerates a dirty main
+  // left by an interrupted run; the worktree remove/prune pair reclaims a stale or crashed worktree.
+  git(["checkout", "-q", "-f", "main"]);
   git(["reset", "--hard", "-q", "base"]);
   git(["worktree", "remove", "--force", WT]);
   git(["worktree", "prune"]);
