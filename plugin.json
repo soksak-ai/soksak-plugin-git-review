@@ -1,0 +1,150 @@
+{
+  "spec": "soksak-spec-plugin@0.0.1",
+  "id": "soksak-plugin-git-review",
+  "name": {
+    "en": "Git Review",
+    "ko": "깃 리뷰"
+  },
+  "version": "0.0.1",
+  "repo": "https://github.com/soksak-ai/soksak-plugin-git-review.git",
+  "description": {
+    "en": "Review a branch or worktree's changes: a diff surface, comments as a deterministic record contract, injecting comments into the target's terminal, and approve then local-merge. Git runs directly.",
+    "ko": "브랜치·워크트리 변경을 리뷰 — diff 표면, 결정적 레코드 계약으로서의 코멘트, 코멘트를 대상 터미널에 주입, 승인 후 로컬 머지. git 은 직접 실행."
+  },
+  "entry": "main.js",
+  "permissions": [
+    "ui",
+    "commands",
+    "commands:destructive",
+    "process",
+    "data",
+    "terminal:write"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "name": "diff.files",
+        "title": {
+          "en": "List changed files",
+          "ko": "변경 파일 목록"
+        }
+      },
+      {
+        "name": "diff.read",
+        "title": {
+          "en": "Read the diff hunks",
+          "ko": "diff 본문 조회"
+        }
+      },
+      {
+        "name": "comment.add",
+        "title": {
+          "en": "Add a review comment",
+          "ko": "리뷰 코멘트 추가"
+        }
+      },
+      {
+        "name": "comment.list",
+        "title": {
+          "en": "List review comments",
+          "ko": "리뷰 코멘트 목록"
+        }
+      },
+      {
+        "name": "comment.resolve",
+        "title": {
+          "en": "Resolve a comment",
+          "ko": "코멘트 해소"
+        }
+      },
+      {
+        "name": "comment.reopen",
+        "title": {
+          "en": "Reopen a comment",
+          "ko": "코멘트 재개"
+        }
+      },
+      {
+        "name": "comment.send",
+        "title": {
+          "en": "Send comments to the target terminal",
+          "ko": "코멘트를 대상 터미널로 전송"
+        }
+      },
+      {
+        "name": "approve",
+        "title": {
+          "en": "Approve the target's changes",
+          "ko": "대상 변경 승인"
+        }
+      },
+      {
+        "name": "merge",
+        "title": {
+          "en": "Merge the approved target",
+          "ko": "승인된 대상 머지"
+        },
+        "danger": "destructive"
+      }
+    ],
+    "views": [
+      {
+        "id": "view",
+        "title": {
+          "en": "Review",
+          "ko": "리뷰"
+        },
+        "icon": "◑",
+        "placements": [
+          "sidebar-right",
+          "content"
+        ],
+        "defaultPlacement": "content",
+        "status": [
+          "loading",
+          "clean",
+          "changed",
+          "approved",
+          "error"
+        ]
+      }
+    ],
+    "nodes": [
+      {
+        "id": "refresh",
+        "description": {
+          "en": "Refresh button (reload files + comments)",
+          "ko": "새로고침 버튼(파일·코멘트 재로드)"
+        }
+      },
+      {
+        "id": "file",
+        "description": {
+          "en": "Changed file row (click = show its diff). data-node=\"file/<key>\"",
+          "ko": "변경 파일 행(클릭=diff 표시). data-node=\"file/<키>\""
+        }
+      },
+      {
+        "id": "comment",
+        "description": {
+          "en": "Comment row. data-node=\"comment/<id>\"",
+          "ko": "코멘트 행. data-node=\"comment/<id>\""
+        }
+      },
+      {
+        "id": "resolve",
+        "description": {
+          "en": "Per-comment resolve toggle. data-node=\"resolve/<id>\"",
+          "ko": "코멘트별 해소 토글. data-node=\"resolve/<id>\""
+        }
+      },
+      {
+        "id": "approve",
+        "description": {
+          "en": "Approve button for the target",
+          "ko": "대상 승인 버튼"
+        }
+      }
+    ]
+  }
+}

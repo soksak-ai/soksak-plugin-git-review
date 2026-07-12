@@ -1,0 +1,15 @@
+{
+  "name": "soksak-plugin-git-review",
+  "private": true,
+  "type": "module",
+  "description": "soksak git-review plugin — diff surface, comment record contract, comment-to-terminal, approve/merge (git run directly)",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --watch",
+    "test": "node build.mjs && node --test",
+    "prepublishOnly": "npm test && npx --yes soksak-plugin-doctor ."
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  }
+}
