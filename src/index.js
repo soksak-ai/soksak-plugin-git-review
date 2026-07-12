@@ -228,7 +228,7 @@ const index_default = {
     reg("merge", {
       danger: "destructive",
       description:
-        "Merge a target branch into the branch checked out at the repository (local, --no-ff). Refuses without an approval record (NOT_APPROVED) and while the target has open comments (UNRESOLVED_COMMENTS). PR/remote is out of scope.",
+        "Merge a target branch into the branch checked out at the repository (local, --no-ff). Refuses without an approval record (NOT_APPROVED) and while the target has open comments (UNRESOLVED_COMMENTS). The approval is consumed on a successful merge — re-merging requires a fresh approval. PR/remote is out of scope.",
       triggers: { ko: "승인된 대상 머지 병합" },
       params: {
         target: { type: "string", description: "Branch to merge", required: true },
@@ -248,6 +248,7 @@ const index_default = {
         if (open.length > 0) return err("UNRESOLVED_COMMENTS", msg(`${open.length} open comment(s) must be resolved`, `open 코멘트 ${open.length}개 해소 필요`));
         const out = await git.merge({ repoRoot: rr.root, target, noFf: p.noFf !== false });
         if (!out.ok) return err(out.code, out.message);
+        await app.data.delete(COLL_APPROVAL, targetKey(target), { scope: SCOPE }); // approval is consumed by the merge
         return { merged: true, oid: out.oid, target };
       },
     });

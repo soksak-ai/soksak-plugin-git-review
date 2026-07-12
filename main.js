@@ -397,7 +397,7 @@ var index_default = {
     });
     reg("merge", {
       danger: "destructive",
-      description: "Merge a target branch into the branch checked out at the repository (local, --no-ff). Refuses without an approval record (NOT_APPROVED) and while the target has open comments (UNRESOLVED_COMMENTS). PR/remote is out of scope.",
+      description: "Merge a target branch into the branch checked out at the repository (local, --no-ff). Refuses without an approval record (NOT_APPROVED) and while the target has open comments (UNRESOLVED_COMMENTS). The approval is consumed on a successful merge \u2014 re-merging requires a fresh approval. PR/remote is out of scope.",
       triggers: { ko: "\uC2B9\uC778\uB41C \uB300\uC0C1 \uBA38\uC9C0 \uBCD1\uD569" },
       params: {
         target: { type: "string", description: "Branch to merge", required: true },
@@ -417,6 +417,7 @@ var index_default = {
         if (open.length > 0) return err("UNRESOLVED_COMMENTS", msg(`${open.length} open comment(s) must be resolved`, `open \uCF54\uBA58\uD2B8 ${open.length}\uAC1C \uD574\uC18C \uD544\uC694`));
         const out = await git.merge({ repoRoot: rr.root, target, noFf: p.noFf !== false });
         if (!out.ok) return err(out.code, out.message);
+        await app.data.delete(COLL_APPROVAL, targetKey(target), { scope: SCOPE });
         return { merged: true, oid: out.oid, target };
       }
     });

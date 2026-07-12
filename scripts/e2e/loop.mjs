@@ -148,7 +148,10 @@ async function main() {
   assert.ok(sent.data.count >= 1);
   await sleep(1500);
   const buf = sok("term.read", { pane, lines: 12 }, { window: win }).data.text;
-  assert.ok(String(buf).includes("please handle the null case"), `payload not in pane buffer:\n${buf}`);
+  // The terminal soft-wraps long lines (inserting newlines mid-word), so compare with all
+  // whitespace stripped — the injected text is present regardless of where it wrapped.
+  const norm = (s) => String(s).replace(/\s+/g, "");
+  assert.ok(norm(buf).includes(norm("please handle the null case")), `payload not in pane buffer:\n${buf}`);
 
   // ── GATE ④ approve→merge (a real merge commit) ───────────────────────────────
   step("④.merge", "resolve comments, approve, then local-merge the target into main");

@@ -140,7 +140,7 @@ test("merge — refuses while open comments remain (no git merge)", async () => 
 });
 
 test("merge — approved + comments resolved → git merge, returns the oid", async () => {
-  const { proc, cmd } = boot();
+  const { m, proc, cmd } = boot();
   await cmd("approve")({ target: "feat/x" });
   const c = await cmd("comment.add")({ target: "feat/x", body: "nit" });
   await cmd("comment.resolve")({ id: c.id });
@@ -149,4 +149,7 @@ test("merge — approved + comments resolved → git merge, returns the oid", as
   assert.equal(out.oid, "mergeoid123");
   const mergeCall = proc.calls.find((c2) => c2.args[0] === "merge");
   assert.ok(mergeCall.args.includes("--no-ff") && mergeCall.args.includes("feat/x"));
+  // the approval is consumed — a second merge without re-approval refuses
+  assert.equal((await q(m, "approval")).length, 0, "approval not consumed by merge");
+  assert.equal((await cmd("merge")({ target: "feat/x" })).code, "NOT_APPROVED", "re-merge must require fresh approval");
 });
