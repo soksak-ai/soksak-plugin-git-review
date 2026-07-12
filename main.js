@@ -1,57 +1,4 @@
 // src/diff.js
-var STATUS_MAP = {
-  M: "modified",
-  A: "added",
-  D: "deleted",
-  R: "renamed",
-  C: "copied",
-  T: "typechange",
-  U: "unmerged"
-};
-function parseNameStatus(stdout) {
-  const out = [];
-  for (const line of String(stdout).split("\n")) {
-    if (!line.trim()) continue;
-    const cols = line.split("	");
-    const letter = (cols[0] || "")[0] || "";
-    const status = STATUS_MAP[letter] || "modified";
-    if ((letter === "R" || letter === "C") && cols.length >= 3) {
-      out.push({ status, path: cols[2], oldPath: cols[1] });
-    } else {
-      out.push({ status, path: cols[cols.length - 1] });
-    }
-  }
-  return out;
-}
-function parseNumstat(stdout) {
-  const map = /* @__PURE__ */ new Map();
-  for (const line of String(stdout).split("\n")) {
-    if (!line.trim()) continue;
-    const cols = line.split("	");
-    if (cols.length < 3) continue;
-    const added = cols[0] === "-" ? null : Number(cols[0]);
-    const deleted = cols[1] === "-" ? null : Number(cols[1]);
-    let path = cols.slice(2).join("	");
-    if (path.includes(" => ")) {
-      path = path.replace(/\{[^}]*? => ([^}]*?)\}/g, "$1").replace(/^.* => /, "");
-    }
-    map.set(path, { added, deleted, binary: added === null && deleted === null });
-  }
-  return map;
-}
-function mergeFileList(nameStatusArr, numstatMap) {
-  return (nameStatusArr || []).map((f) => {
-    const n = numstatMap && numstatMap.get(f.path) || {};
-    return {
-      path: f.path,
-      status: f.status,
-      ...f.oldPath ? { oldPath: f.oldPath } : {},
-      added: n.added ?? null,
-      deleted: n.deleted ?? null,
-      binary: !!n.binary
-    };
-  });
-}
 function nodeKey(path) {
   const k = String(path).toLowerCase().replace(/[^a-z0-9.-]+/g, "-").replace(/-{2,}/g, "-").replace(/^-+|-+$/g, "");
   return /^[a-z0-9]/.test(k) ? k : "f-" + k;
@@ -104,96 +51,60 @@ function formatCommentPayload(target, comments) {
 }
 
 // src/git.js
-var READ_ENV = Object.freeze({ LC_ALL: "C", LANG: "C", GIT_OPTIONAL_LOCKS: "0" });
-var WRITE_ENV = Object.freeze({ LC_ALL: "C", LANG: "C" });
-var READ_TIMEOUT_MS = 3e4;
-var WRITE_TIMEOUT_MS = 18e4;
-var NOT_REPO_RE = /not a git repository/i;
-function gitFail(r) {
-  return { ok: false, code: "GIT_ERROR", message: r.stderr || `git exit ${r.code}` };
+var GIT_CONTRACT = "soksak-git-spec@1";
+function noProvider(msg) {
+  return {
+    ok: false,
+    code: "NO_GIT_PROVIDER",
+    message: msg(
+      `no enabled plugin implements ${GIT_CONTRACT}`,
+      `${GIT_CONTRACT} \uC744 \uAD6C\uD604\uD55C \uD65C\uC131 \uD50C\uB7EC\uADF8\uC778\uC774 \uC5C6\uC2B5\uB2C8\uB2E4`
+    )
+  };
 }
-function validRef(ref) {
-  if (typeof ref !== "string" || ref.length === 0) return false;
-  if (ref.startsWith("-") || ref.includes("..") || ref.endsWith("/") || ref.endsWith(".lock")) return false;
-  return /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(ref) || ref === "HEAD";
-}
-function makeGit(processApi) {
-  function run({ cwd, args, write = false, timeoutMs }) {
-    return new Promise((resolve, reject) => {
-      const limit = timeoutMs ?? (write ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS);
-      const dec = new TextDecoder();
-      let out = "";
-      let err = "";
-      let done = false;
-      let timer = null;
-      processApi.spawn("git", args, { cwd, env: write ? { ...WRITE_ENV } : { ...READ_ENV } }).then((handle) => {
-        const subs = [];
-        const finish = (fn, v) => {
-          if (done) return;
-          done = true;
-          if (timer) clearTimeout(timer);
-          for (const s of subs) s.dispose();
-          fn(v);
-        };
-        timer = setTimeout(() => {
-          void processApi.kill(handle);
-          finish(reject, new Error(`git ${args[0] ?? ""} timeout ${limit}ms`));
-        }, limit);
-        subs.push(
-          processApi.onData(handle, (b) => out += dec.decode(b, { stream: true })),
-          processApi.onStderr(handle, (b) => err += new TextDecoder().decode(b)),
-          processApi.onExit(handle, (code) => finish(resolve, { code, stdout: out, stderr: err.trim() }))
-        );
-      }).catch((e) => {
-        if (!done) {
-          done = true;
-          if (timer) clearTimeout(timer);
-          reject(e instanceof Error ? e : new Error(String(e)));
-        }
-      });
-    });
+function makeGit(app, msg) {
+  async function provider() {
+    const out = await app.commands.execute("plugin.implementers", { contract: GIT_CONTRACT });
+    if (!out?.ok) return null;
+    const found = (out.data?.implementers ?? []).find((i) => i.status === "enabled");
+    return found?.id ?? null;
+  }
+  async function call(cmd, params) {
+    const id = await provider();
+    if (!id) return noProvider(msg);
+    return app.commands.execute(`plugin.${id}.${cmd}`, params);
   }
   return {
-    run,
-    // Tri-state repository root discovery.
+    call,
+    // Tri-state root discovery, and the refusal's code travels with it: "git failed" and "there is
+    // no git" are different facts.
     async root(cwd) {
-      try {
-        const r = await run({ cwd, args: ["rev-parse", "--show-toplevel"] });
-        if (r.code === 0) return { state: "repo", root: r.stdout.trim() };
-        if (NOT_REPO_RE.test(r.stderr)) return { state: "not-repo" };
-        return { state: "error", error: r.stderr };
-      } catch (e) {
-        return { state: "error", error: String(e?.message ?? e) };
-      }
+      const out = await call("root", { path: cwd });
+      if (!out.ok) return { state: "error", error: out.message, code: out.code };
+      return out.data ?? { state: "error", error: "empty answer", code: "GIT_ERROR" };
     },
-    // name-status of base...target (changes on target since it diverged from base).
-    async nameStatus({ repoRoot, base, target }) {
-      const r = await run({ cwd: repoRoot, args: ["diff", "--name-status", `${base}...${target}`] });
-      if (r.code !== 0) return gitFail(r);
-      return { ok: true, stdout: r.stdout };
+    // What the branch changed since it diverged (the three-dot range base...target). The contract
+    // returns the file list already merged with its line counts — the name-status and numstat
+    // parsers this plugin used to carry are the implementer's business now.
+    async files({ repoRoot, base, target }) {
+      const out = await call("diff.files", { path: repoRoot, base, target });
+      return out.ok ? { ok: true, files: out.data?.files ?? [] } : out;
     },
-    async numstat({ repoRoot, base, target }) {
-      const r = await run({ cwd: repoRoot, args: ["diff", "--numstat", `${base}...${target}`] });
-      if (r.code !== 0) return gitFail(r);
-      return { ok: true, stdout: r.stdout };
-    },
-    // unified diff hunks of base...target, optionally narrowed to one file.
+    // The unified diff of the same range, optionally narrowed to one file.
     async hunks({ repoRoot, base, target, file }) {
-      const args = ["diff", `${base}...${target}`];
-      if (typeof file === "string" && file) args.push("--", file);
-      const r = await run({ cwd: repoRoot, args });
-      if (r.code !== 0) return gitFail(r);
-      return { ok: true, diff: r.stdout };
+      const out = await call("diff.range", { path: repoRoot, base, target, ...file ? { file } : {} });
+      return out.ok ? { ok: true, diff: out.data?.diff ?? "" } : out;
     },
-    // Local merge of target into the branch checked out at repoRoot (the base). Returns the new HEAD.
+    // What is checked out at the repository root — the base a review merges into.
+    async head(repoRoot) {
+      const out = await call("head", { path: repoRoot });
+      return out.ok ? { ok: true, ...out.data ?? {} } : out;
+    },
+    // Merge the approved target into what is checked out. A conflict comes back as the contract's
+    // GIT_ERROR carrying git's own text — this plugin does not resolve, abort, or commit its way out.
     async merge({ repoRoot, target, noFf = true }) {
-      const args = ["merge"];
-      if (noFf) args.push("--no-ff");
-      args.push("-m", `Merge ${target}`, "--", target);
-      const r = await run({ cwd: repoRoot, args, write: true });
-      if (r.code !== 0) return gitFail(r);
-      const head = await run({ cwd: repoRoot, args: ["rev-parse", "HEAD"] });
-      return { ok: true, oid: head.stdout.trim() };
+      const out = await call("merge", { path: repoRoot, target, noFf });
+      return out.ok ? { ok: true, oid: out.data?.oid } : out;
     }
   };
 }
@@ -221,7 +132,7 @@ var index_default = {
     const err = (code, message) => ({ ok: false, code, message });
     const msg = (en, ko) => (typeof app.locale === "function" ? app.locale() : "en") === "ko" ? ko : en;
     const reg = (name, spec) => ctx.subscriptions.push(app.commands.register(name, spec));
-    const git = makeGit(app.process);
+    const git = makeGit(app, msg);
     void app.data.define(COLL_COMMENT, { indexes: ["target", "status", "file", "createdAt"] });
     void app.data.define(COLL_APPROVAL, { indexes: ["target", "createdAt"] });
     const loadComments = async (target, status) => {
@@ -241,7 +152,7 @@ var index_default = {
       const st = await git.root(repoPath);
       if (st.state === "repo") return { ok: true, root: st.root };
       if (st.state === "not-repo") return { ok: false, out: err("NOT_REPO", msg("not a git repository", "git \uC800\uC7A5\uC18C\uAC00 \uC544\uB2D9\uB2C8\uB2E4")) };
-      return { ok: false, out: err("GIT_ERROR", st.error || "git error") };
+      return { ok: false, out: err(st.code || "GIT_ERROR", st.error || "git error") };
     }
     const repoPathParam = (p) => (typeof p.path === "string" && p.path ? p.path : void 0) ?? app.project?.current?.()?.root ?? void 0;
     const baseParam = (p) => typeof p.base === "string" && p.base ? p.base : DEFAULT_BASE;
@@ -259,14 +170,11 @@ var index_default = {
       handler: async (p) => {
         const target = String(p.target ?? "");
         const base = baseParam(p);
-        if (!validRef(target) || !validRef(base)) return err("INVALID_REF", msg("invalid ref", "\uD5C8\uC6A9\uB418\uC9C0 \uC54A\uB294 ref"));
         const rr = await resolveRepoRoot(repoPathParam(p));
         if (!rr.ok) return rr.out;
-        const ns = await git.nameStatus({ repoRoot: rr.root, base, target });
-        if (!ns.ok) return err(ns.code, ns.message);
-        const nm = await git.numstat({ repoRoot: rr.root, base, target });
-        const files = mergeFileList(parseNameStatus(ns.stdout), nm.ok ? parseNumstat(nm.stdout) : /* @__PURE__ */ new Map());
-        return { target, base, files };
+        const out = await git.files({ repoRoot: rr.root, base, target });
+        if (!out.ok) return err(out.code, out.message);
+        return { target, base, files: out.files };
       }
     });
     reg("diff.read", {
@@ -284,7 +192,6 @@ var index_default = {
       handler: async (p) => {
         const target = String(p.target ?? "");
         const base = baseParam(p);
-        if (!validRef(target) || !validRef(base)) return err("INVALID_REF", msg("invalid ref", "\uD5C8\uC6A9\uB418\uC9C0 \uC54A\uB294 ref"));
         const rr = await resolveRepoRoot(repoPathParam(p));
         if (!rr.ok) return rr.out;
         const file = typeof p.file === "string" && p.file ? p.file : void 0;
@@ -437,7 +344,6 @@ var index_default = {
       message: (d) => msg(`Merged ${d.target} (${String(d.oid).slice(0, 7)})`, `${d.target} \uBA38\uC9C0 (${String(d.oid).slice(0, 7)})`),
       handler: async (p) => {
         const target = String(p.target ?? "");
-        if (!validRef(target)) return err("INVALID_REF", msg("invalid ref", "\uD5C8\uC6A9\uB418\uC9C0 \uC54A\uB294 ref"));
         const rr = await resolveRepoRoot(repoPathParam(p));
         if (!rr.ok) return rr.out;
         if (!await approvalOf(target)) return err("NOT_APPROVED", msg(`${target} is not approved`, `${target} \uBBF8\uC2B9\uC778`));
@@ -519,8 +425,8 @@ function mkView(app, git, deps, cleanups) {
         errEl.style.display = "none";
         report("loading", msg("Loading\u2026", "\uBD88\uB7EC\uC624\uB294 \uC911\u2026"));
         if (!root) return showError(msg("no project root", "\uD504\uB85C\uC81D\uD2B8 \uB8E8\uD2B8 \uC5C6\uC74C"));
-        const br = await git.run({ cwd: root, args: ["rev-parse", "--abbrev-ref", "HEAD"] });
-        target = br.code === 0 ? br.stdout.trim() : null;
+        const hd = await git.head(root);
+        target = hd.ok ? hd.branch : null;
         title.textContent = target ? `${msg("Review", "\uB9AC\uBDF0")}: ${target}` : msg("Review", "\uB9AC\uBDF0");
         listEl.replaceChildren();
         if (!target || target === DEFAULT_BASE2) {
@@ -529,9 +435,9 @@ function mkView(app, git, deps, cleanups) {
           await loadComments_();
           return;
         }
-        const ns = await git.nameStatus({ repoRoot: root, base: DEFAULT_BASE2, target });
+        const ns = await git.files({ repoRoot: root, base: DEFAULT_BASE2, target });
         if (!ns.ok) return showError(`${ns.code}: ${ns.message}`);
-        const files = parseNameStatus(ns.stdout);
+        const files = ns.files;
         const approved = !!await approvalOf(target);
         if (files.length === 0) {
           listEl.append(h("div", "padding:4px 12px;color:var(--fg3)", msg("No changes", "\uBCC0\uACBD \uC5C6\uC74C")));

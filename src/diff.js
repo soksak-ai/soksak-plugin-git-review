@@ -1,66 +1,9 @@
-// Pure diff parsing — name-status → per-file status, numstat → add/delete counts, merged into the
-// file list the view and diff.files return. Plus a stable address-safe key for a file path.
-
-const STATUS_MAP = {
-  M: "modified",
-  A: "added",
-  D: "deleted",
-  R: "renamed",
-  C: "copied",
-  T: "typechange",
-  U: "unmerged",
-};
-
-// `git diff --name-status` → [{status, path, oldPath?}]. Renames/copies carry the old path.
-export function parseNameStatus(stdout) {
-  const out = [];
-  for (const line of String(stdout).split("\n")) {
-    if (!line.trim()) continue;
-    const cols = line.split("\t");
-    const letter = (cols[0] || "")[0] || "";
-    const status = STATUS_MAP[letter] || "modified";
-    if ((letter === "R" || letter === "C") && cols.length >= 3) {
-      out.push({ status, path: cols[2], oldPath: cols[1] });
-    } else {
-      out.push({ status, path: cols[cols.length - 1] });
-    }
-  }
-  return out;
-}
-
-// `git diff --numstat` → Map(path → {added, deleted, binary}). Binary files report "-"/"-".
-export function parseNumstat(stdout) {
-  const map = new Map();
-  for (const line of String(stdout).split("\n")) {
-    if (!line.trim()) continue;
-    const cols = line.split("\t");
-    if (cols.length < 3) continue;
-    const added = cols[0] === "-" ? null : Number(cols[0]);
-    const deleted = cols[1] === "-" ? null : Number(cols[1]);
-    let path = cols.slice(2).join("\t");
-    if (path.includes(" => ")) {
-      // rename form: "{old => new}/x" or "old => new" — keep the new path
-      path = path.replace(/\{[^}]*? => ([^}]*?)\}/g, "$1").replace(/^.* => /, "");
-    }
-    map.set(path, { added, deleted, binary: added === null && deleted === null });
-  }
-  return map;
-}
-
-// Merge name-status (status) with numstat (counts) into the file list.
-export function mergeFileList(nameStatusArr, numstatMap) {
-  return (nameStatusArr || []).map((f) => {
-    const n = (numstatMap && numstatMap.get(f.path)) || {};
-    return {
-      path: f.path,
-      status: f.status,
-      ...(f.oldPath ? { oldPath: f.oldPath } : {}),
-      added: n.added ?? null,
-      deleted: n.deleted ?? null,
-      binary: !!n.binary,
-    };
-  });
-}
+// The one diff concern this plugin still owns: a stable, address-safe key for a file path.
+//
+// The parsing that used to live here — name-status into per-file status, numstat into line counts,
+// the merge of the two — is the git domain's, and it is now the contract's (soksak-git-spec@1
+// §7.3): diff.files answers with the file list already merged. A consumer that re-parses git's
+// output has taken the domain back, and taken its bugs with it.
 
 // A file path → a stable node-path segment (^[a-z0-9][a-z0-9.-]*$). The path is the stable key.
 export function nodeKey(path) {

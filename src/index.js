@@ -2,9 +2,9 @@
 // (process capability — coupling 0, no other-plugin calls). Comments are records whose schema is
 // the contract downstream consumers read; comment.send injects a target's open comments into a
 // terminal pane; approve+merge run git directly. External data (paths/diffs) is textContent only.
-import { parseNameStatus, parseNumstat, mergeFileList, nodeKey } from "./diff.js";
+import { nodeKey } from "./diff.js";
 import { normalizeComment, targetKey, sortComments, formatCommentPayload } from "./comment.js";
-import { makeGit, validRef } from "./git.js";
+import { makeGit } from "./git.js";
 
 const COLL_COMMENT = "comment";
 const COLL_APPROVAL = "approval";
@@ -30,7 +30,8 @@ const index_default = {
     const err = (code, message) => ({ ok: false, code, message });
     const msg = (en, ko) => ((typeof app.locale === "function" ? app.locale() : "en") === "ko" ? ko : en);
     const reg = (name, spec) => ctx.subscriptions.push(app.commands.register(name, spec));
-    const git = makeGit(app.process); // git CLI, run directly (coupling 0)
+    // git comes from the contract, and the implementer is discovered, never named (C3 L2 contract-pin).
+    const git = makeGit(app, msg);
 
     void app.data.define(COLL_COMMENT, { indexes: ["target", "status", "file", "createdAt"] });
     void app.data.define(COLL_APPROVAL, { indexes: ["target", "createdAt"] });
@@ -53,7 +54,8 @@ const index_default = {
       const st = await git.root(repoPath);
       if (st.state === "repo") return { ok: true, root: st.root };
       if (st.state === "not-repo") return { ok: false, out: err("NOT_REPO", msg("not a git repository", "git 저장소가 아닙니다")) };
-      return { ok: false, out: err("GIT_ERROR", st.error || "git error") };
+      // NO_GIT_PROVIDER survives as itself — nothing implements the contract, which is not a git error.
+      return { ok: false, out: err(st.code || "GIT_ERROR", st.error || "git error") };
     }
     const repoPathParam = (p) => (typeof p.path === "string" && p.path ? p.path : undefined) ?? app.project?.current?.()?.root ?? undefined;
     const baseParam = (p) => (typeof p.base === "string" && p.base ? p.base : DEFAULT_BASE);
@@ -74,14 +76,14 @@ const index_default = {
       handler: async (p) => {
         const target = String(p.target ?? "");
         const base = baseParam(p);
-        if (!validRef(target) || !validRef(base)) return err("INVALID_REF", msg("invalid ref", "허용되지 않는 ref"));
         const rr = await resolveRepoRoot(repoPathParam(p));
         if (!rr.ok) return rr.out;
-        const ns = await git.nameStatus({ repoRoot: rr.root, base, target });
-        if (!ns.ok) return err(ns.code, ns.message);
-        const nm = await git.numstat({ repoRoot: rr.root, base, target });
-        const files = mergeFileList(parseNameStatus(ns.stdout), nm.ok ? parseNumstat(nm.stdout) : new Map());
-        return { target, base, files };
+        // The ref whitelist is the contract's (soksak-git-spec@1 §3) — a hostile ref is refused there,
+        // before anything runs, and its refusal comes back as INVALID_REF. Re-deriving that check here
+        // would be a second copy of a security rule, which is the debt this contract exists to end.
+        const out = await git.files({ repoRoot: rr.root, base, target });
+        if (!out.ok) return err(out.code, out.message);
+        return { target, base, files: out.files };
       },
     });
 
@@ -102,7 +104,6 @@ const index_default = {
       handler: async (p) => {
         const target = String(p.target ?? "");
         const base = baseParam(p);
-        if (!validRef(target) || !validRef(base)) return err("INVALID_REF", msg("invalid ref", "허용되지 않는 ref"));
         const rr = await resolveRepoRoot(repoPathParam(p));
         if (!rr.ok) return rr.out;
         const file = typeof p.file === "string" && p.file ? p.file : undefined;
@@ -270,7 +271,6 @@ const index_default = {
       message: (d) => msg(`Merged ${d.target} (${String(d.oid).slice(0, 7)})`, `${d.target} 머지 (${String(d.oid).slice(0, 7)})`),
       handler: async (p) => {
         const target = String(p.target ?? "");
-        if (!validRef(target)) return err("INVALID_REF", msg("invalid ref", "허용되지 않는 ref"));
         const rr = await resolveRepoRoot(repoPathParam(p));
         if (!rr.ok) return rr.out;
         if (!(await approvalOf(target))) return err("NOT_APPROVED", msg(`${target} is not approved`, `${target} 미승인`));
@@ -363,8 +363,8 @@ function mkView(app, git, deps, cleanups) {
         errEl.style.display = "none";
         report("loading", msg("Loading…", "불러오는 중…"));
         if (!root) return showError(msg("no project root", "프로젝트 루트 없음"));
-        const br = await git.run({ cwd: root, args: ["rev-parse", "--abbrev-ref", "HEAD"] });
-        target = br.code === 0 ? br.stdout.trim() : null;
+        const hd = await git.head(root);
+        target = hd.ok ? hd.branch : null;
         title.textContent = target ? `${msg("Review", "리뷰")}: ${target}` : msg("Review", "리뷰");
         listEl.replaceChildren();
         if (!target || target === DEFAULT_BASE) {
@@ -373,9 +373,9 @@ function mkView(app, git, deps, cleanups) {
           await loadComments_();
           return;
         }
-        const ns = await git.nameStatus({ repoRoot: root, base: DEFAULT_BASE, target });
+        const ns = await git.files({ repoRoot: root, base: DEFAULT_BASE, target });
         if (!ns.ok) return showError(`${ns.code}: ${ns.message}`);
-        const files = parseNameStatus(ns.stdout);
+        const files = ns.files;
         const approved = !!(await approvalOf(target));
         if (files.length === 0) {
           listEl.append(h("div", "padding:4px 12px;color:var(--fg3)", msg("No changes", "변경 없음")));

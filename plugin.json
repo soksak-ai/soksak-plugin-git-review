@@ -16,7 +16,6 @@
     "ui",
     "commands",
     "commands:destructive",
-    "process",
     "data",
     "terminal",
     "terminal:write"
@@ -162,5 +161,8 @@
         }
       }
     ]
-  }
+  },
+  "consumes": [
+    "soksak-git-spec@1"
+  ]
 }

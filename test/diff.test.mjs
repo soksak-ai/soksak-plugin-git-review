@@ -1,34 +1,30 @@
-// Pure diff parsing — name-status, numstat, merge, node key.
-// RED baseline: mis-parsed status letters, dropped counts, a non-address-safe key.
+// The one diff concern this plugin still owns: the address key for a file row.
+//
+// The parsing that used to be tested here — name-status into per-file status, numstat into line
+// counts, the merge of the two — belongs to the git domain, and it is now the contract's
+// (soksak-git-spec@1 §7.3, scored by soksak-contract-git). A consumer that re-parses git's output
+// has taken the domain back, and taken its bugs with it.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseNameStatus, parseNumstat, mergeFileList, nodeKey } from "../src/diff.js";
+import { nodeKey } from "../src/diff.js";
 
-test("parseNameStatus — status letters + rename old path", () => {
-  const out = parseNameStatus("M\tsrc/a.ts\nA\tsrc/b.ts\nD\told.ts\nR100\tsrc/c.ts\tsrc/d.ts\n");
-  assert.deepEqual(out[0], { status: "modified", path: "src/a.ts" });
-  assert.deepEqual(out[1], { status: "added", path: "src/b.ts" });
-  assert.deepEqual(out[2], { status: "deleted", path: "old.ts" });
-  assert.deepEqual(out[3], { status: "renamed", path: "src/d.ts", oldPath: "src/c.ts" });
+test("nodeKey — a file path becomes a stable, address-safe node segment", () => {
+  // The path is the stable identifier (never a counter), but a node path segment must match
+  // ^[a-z0-9][a-z0-9.-]*$ — so it is lowercased and the rest is folded to "-".
+  assert.equal(nodeKey("src/main.ts"), "src-main.ts");
+  assert.equal(nodeKey("SRC/Main.TS"), "src-main.ts");
+  assert.equal(nodeKey("a b/c_d.js"), "a-b-c-d.js");
+  assert.match(nodeKey("src/a.ts"), /^[a-z0-9][a-z0-9.-]*$/);
 });
 
-test("parseNumstat — counts, binary as null, rename new path", () => {
-  const m = parseNumstat("3\t1\tsrc/a.ts\n-\t-\timg.png\n5\t0\tsrc/d.ts\n");
-  assert.deepEqual(m.get("src/a.ts"), { added: 3, deleted: 1, binary: false });
-  assert.deepEqual(m.get("img.png"), { added: null, deleted: null, binary: true });
-  assert.deepEqual(m.get("src/d.ts"), { added: 5, deleted: 0, binary: false });
+test("nodeKey — a path that cannot start a segment still yields a legal one", () => {
+  // A leading separator is folded away rather than prefixed; only a key that would still be illegal
+  // gets the "f-" prefix. Either way the result is addressable — a row is never left without a key.
+  assert.equal(nodeKey("_hidden.ts"), "hidden.ts");
+  assert.match(nodeKey("_hidden.ts"), /^[a-z0-9][a-z0-9.-]*$/);
+  assert.match(nodeKey("///"), /^[a-z0-9][a-z0-9.-]*$/);
 });
 
-test("mergeFileList — status joined with counts", () => {
-  const ns = parseNameStatus("M\tsrc/a.ts\nA\timg.png\n");
-  const nm = parseNumstat("3\t1\tsrc/a.ts\n-\t-\timg.png\n");
-  const merged = mergeFileList(ns, nm);
-  assert.deepEqual(merged[0], { path: "src/a.ts", status: "modified", added: 3, deleted: 1, binary: false });
-  assert.deepEqual(merged[1], { path: "img.png", status: "added", added: null, deleted: null, binary: true });
-});
-
-test("nodeKey — address-safe segment derived from path", () => {
-  const re = /^[a-z0-9][a-z0-9.-]*$/;
-  for (const p of ["src/a.ts", "DIR/Weird Name.tsx", "x/y/z.rs"]) assert.ok(re.test(nodeKey(p)), `${p} → ${nodeKey(p)}`);
-  assert.equal(nodeKey("src/a.ts"), "src-a.ts");
+test("nodeKey — distinct paths keep distinct keys (a row is addressable)", () => {
+  assert.notEqual(nodeKey("src/a.ts"), nodeKey("src/b.ts"));
 });

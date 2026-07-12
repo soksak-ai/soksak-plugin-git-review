@@ -2,8 +2,19 @@
 
 Local review for a branch or worktree's changes. A diff surface, comments stored as a
 deterministic record contract, a command to send comments into the target's terminal, and an
-approve-then-merge lifecycle. Git runs directly through the process capability — no dependency
-on another plugin.
+approve-then-merge lifecycle.
+
+It runs no git. Repository discovery, the branch's changes (the three-dot range `base...target`),
+the unified diff, the checked-out HEAD, and the merge all come from **`soksak-git-spec@1`**, and the
+plugin that implements it is found **by contract, never by name**: the manifest declares
+`consumes: ["soksak-git-spec@1"]`, the implementer is resolved through `plugin.implementers`, and no
+plugin id appears in this plugin's code or manifest. No enabled implementer is a loud refusal
+(`NO_GIT_PROVIDER`).
+
+Because it runs no git, it holds **no `process` permission** — it cannot spawn anything. The ref
+whitelist that turns `--upload-pack=…` into a refusal instead of a command, and the diff parsing
+that turns a rename into the right path, are the contract's and are scored there. Carrying a second
+copy of a security rule is how the wrong copy ships.
 
 ## Commands
 

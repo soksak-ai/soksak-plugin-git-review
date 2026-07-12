@@ -1,60 +1,118 @@
-// Handler orchestration — diff/comment/approve/merge, driven by mocked process (git), data, and
-// terminal. RED baseline: a diff that does not run git, a comment that skips validation, a merge
-// that proceeds without approval or with open comments, a send that does not inject.
+// Handler orchestration — diff/comment/approve/merge.
+//
+// git is not run here and is not mocked at the process level: this plugin consumes
+// soksak-git-spec@1 and calls whoever implements it. The harness plays the implementer, and the id
+// it plays is deliberately not the one that ships — an implementer named anywhere in this plugin
+// would fail these tests.
+//
+// RED baseline: a diff that never asks the provider, a comment that skips validation, a merge that
+// proceeds without approval or with open comments, a send that does not inject.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { mockApp } from "./helpers/mock-app.mjs";
-import { mockProcess } from "./helpers/mock-process.mjs";
 
 const manifest = JSON.parse(readFileSync(new URL("../plugin.json", import.meta.url), "utf8"));
 const plugin = (await import("../main.js")).default;
 
-// git process handler by argv.
-function defaultGit(_cmd, args) {
-  if (args[0] === "rev-parse" && args.includes("--show-toplevel")) return { stdout: "/repo\n", code: 0 };
-  if (args[0] === "rev-parse" && args.includes("HEAD")) return { stdout: "mergeoid123\n", code: 0 };
-  if (args[0] === "diff" && args.includes("--name-status")) return { stdout: "M\tsrc/a.ts\nA\tsrc/b.ts\n", code: 0 };
-  if (args[0] === "diff" && args.includes("--numstat")) return { stdout: "3\t1\tsrc/a.ts\n5\t0\tsrc/b.ts\n", code: 0 };
-  if (args[0] === "diff") return { stdout: "diff --git a/src/a.ts b/src/a.ts\n@@ -1 +1 @@\n-x\n+y\n", code: 0 };
-  if (args[0] === "merge") return { code: 0 };
-  return { stdout: "", code: 0 };
+const CONTRACT = "soksak-git-spec@1";
+const PROVIDER = "soksak-plugin-any-git";
+const ok = (data) => ({ ok: true, code: "OK", message: "", data });
+const fail = (code, message) => ({ ok: false, code, message });
+
+// The implementer's answers, by contract command name.
+function defaultGit() {
+  return {
+    root: () => ok({ state: "repo", root: "/repo" }),
+    head: () => ok({ branch: "feat/x", oid: "a".repeat(40), detached: false }),
+    "diff.files": (p) =>
+      ok({
+        base: p.base,
+        target: p.target,
+        files: [
+          { path: "src/a.ts", status: "modified", added: 3, deleted: 1, binary: false },
+          { path: "src/b.ts", status: "added", added: 5, deleted: 0, binary: false },
+        ],
+      }),
+    "diff.range": () => ok({ diff: "diff --git a/src/a.ts b/src/a.ts\n@@ -1 +1 @@\n-x\n+y\n" }),
+    merge: () => ok({ oid: "mergeoid123" }),
+  };
 }
 
-function boot({ git } = {}) {
-  const proc = mockProcess(git ?? defaultGit);
+// One router: the core's commands, and the contract's implementer (discovered, never named).
+function router({ git = {}, implementers } = {}) {
+  const calls = [];
+  const gitCalls = [];
+  const table = { ...defaultGit(), ...git };
+  const enabled = implementers ?? [{ id: PROVIDER, version: "1.0.0", status: "enabled" }];
+  const fn = async (name, params) => {
+    calls.push({ name, params });
+    if (name === "plugin.implementers") return ok({ contract: params?.contract, implementers: enabled });
+    if (name.startsWith(`plugin.${PROVIDER}.`)) {
+      const cmd = name.slice(`plugin.${PROVIDER}.`.length);
+      gitCalls.push({ cmd, params });
+      const h = table[cmd];
+      return h ? h(params) : ok({});
+    }
+    return ok({});
+  };
+  return { fn, calls, gitCalls };
+}
+
+function boot({ git, implementers } = {}) {
+  const r = router({ git, implementers });
   const terminalCalls = [];
   const terminal = { sendText: (pane, text) => (terminalCalls.push({ pane, text }), true), readBuffer: () => "" };
-  const m = mockApp({ manifest, project: { id: "p1", root: "/repo" }, process: proc.api, terminal });
+  const m = mockApp({ manifest, project: { id: "p1", root: "/repo" }, executeCommand: r.fn, terminal });
   plugin.activate(m.ctx);
   const cmd = (name) => m.registered.get(name).handler;
-  return { m, proc, terminalCalls, cmd };
+  return { m, r, terminalCalls, cmd };
 }
 const q = (m, coll) => m.app.data.query(coll, { scope: "index" });
 
-test("diff.files — runs git name-status + numstat, returns the merged file list", async () => {
-  const { proc, cmd } = boot();
+test("diff.files — asks the provider for the branch's changes and returns its file list", async () => {
+  const { r, cmd } = boot();
   const out = await cmd("diff.files")({ target: "feat/x" });
   assert.equal(out.target, "feat/x");
   assert.equal(out.base, "main");
   assert.deepEqual(out.files[0], { path: "src/a.ts", status: "modified", added: 3, deleted: 1, binary: false });
   assert.deepEqual(out.files[1], { path: "src/b.ts", status: "added", added: 5, deleted: 0, binary: false });
-  const ns = proc.calls.find((c) => c.args.includes("--name-status"));
-  assert.ok(ns.args.includes("main...feat/x")); // three-dot range
+
+  // The range is the contract's (base...target, three dots) — this plugin passes the two refs and
+  // does not assemble git syntax of its own.
+  const call = r.gitCalls.find((c) => c.cmd === "diff.files");
+  assert.deepEqual(call.params, { path: "/repo", base: "main", target: "feat/x" });
+  assert.ok(
+    r.calls.some((c) => c.name === "plugin.implementers" && c.params?.contract === CONTRACT),
+    "the provider was never resolved by contract",
+  );
+  for (const c of r.calls) assert.ok(!c.name.includes("git-core"), `an implementer is named: ${c.name}`);
 });
 
-test("diff.files — an invalid ref is rejected before git runs", async () => {
-  const { proc, cmd } = boot();
+test("diff.files — a hostile ref is the contract's refusal, and it comes back untouched", async () => {
+  // The whitelist lives in the contract (§3): the implementer refuses before anything runs. This
+  // plugin keeps no second copy of that rule — a duplicated defense is the debt the contract ends.
+  const { cmd } = boot({ git: { "diff.files": () => fail("INVALID_REF", "ref not allowed") } });
   const out = await cmd("diff.files")({ target: "--upload-pack=evil" });
+  assert.equal(out.ok, false);
   assert.equal(out.code, "INVALID_REF");
-  assert.equal(proc.calls.filter((c) => c.args.includes("--name-status")).length, 0);
 });
 
-test("diff.read — returns the unified diff", async () => {
-  const { cmd } = boot();
+test("diff.files — no enabled implementer is a loud refusal", async () => {
+  const { r, cmd } = boot({ implementers: [] });
+  const out = await cmd("diff.files")({ target: "feat/x" });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, "NO_GIT_PROVIDER");
+  assert.equal(r.gitCalls.length, 0);
+});
+
+test("diff.read — returns the unified diff of the range", async () => {
+  const { r, cmd } = boot();
   const out = await cmd("diff.read")({ target: "feat/x", file: "src/a.ts" });
   assert.ok(out.diff.includes("@@ -1 +1 @@"));
   assert.equal(out.file, "src/a.ts");
+  const call = r.gitCalls.find((c) => c.cmd === "diff.range");
+  assert.deepEqual(call.params, { path: "/repo", base: "main", target: "feat/x", file: "src/a.ts" });
 });
 
 test("comment.add — validates then persists a record carrying the contract fields", async () => {
@@ -133,14 +191,14 @@ test("approve — records approval keyed by target", async () => {
 });
 
 test("approve.revoke — a withdrawn approval sends merge back to refusing", async () => {
-  const { m, proc, cmd } = boot();
+  const { m, r, cmd } = boot();
   await cmd("approve")({ target: "feat/x" });
   const out = await cmd("approve.revoke")({ target: "feat/x" });
   assert.equal(out.revoked, true);
   assert.equal((await q(m, "approval")).length, 0, "the approval record must be gone, not merely flagged");
   const merged = await cmd("merge")({ target: "feat/x" });
   assert.equal(merged.code, "NOT_APPROVED", "an approval taken back must stop being a key to merge");
-  assert.equal(proc.calls.filter((c) => c.args[0] === "merge").length, 0);
+  assert.equal(r.gitCalls.filter((c) => c.cmd === "merge").length, 0);
 });
 
 test("approve.revoke — revoking what was never approved is a no-op", async () => {
@@ -149,32 +207,34 @@ test("approve.revoke — revoking what was never approved is a no-op", async () 
   assert.equal((await cmd("approve.revoke")({})).code, "INVALID_PARAMS");
 });
 
-test("merge — refuses without approval (no git merge)", async () => {
-  const { proc, cmd } = boot();
+test("merge — refuses without approval (the provider is never asked to merge)", async () => {
+  const { r, cmd } = boot();
   const out = await cmd("merge")({ target: "feat/x" });
   assert.equal(out.code, "NOT_APPROVED");
-  assert.equal(proc.calls.filter((c) => c.args[0] === "merge").length, 0);
+  assert.equal(r.gitCalls.filter((c) => c.cmd === "merge").length, 0);
 });
 
-test("merge — refuses while open comments remain (no git merge)", async () => {
-  const { proc, cmd } = boot();
+test("merge — refuses while open comments remain (the provider is never asked to merge)", async () => {
+  const { r, cmd } = boot();
   await cmd("approve")({ target: "feat/x" });
   await cmd("comment.add")({ target: "feat/x", body: "unresolved" });
   const out = await cmd("merge")({ target: "feat/x" });
   assert.equal(out.code, "UNRESOLVED_COMMENTS");
-  assert.equal(proc.calls.filter((c) => c.args[0] === "merge").length, 0);
+  assert.equal(r.gitCalls.filter((c) => c.cmd === "merge").length, 0);
 });
 
-test("merge — approved + comments resolved → git merge, returns the oid", async () => {
-  const { m, proc, cmd } = boot();
+test("merge — approved + comments resolved → the provider merges, and the oid comes back", async () => {
+  const { m, r, cmd } = boot();
   await cmd("approve")({ target: "feat/x" });
   const c = await cmd("comment.add")({ target: "feat/x", body: "nit" });
   await cmd("comment.resolve")({ id: c.id });
   const out = await cmd("merge")({ target: "feat/x" });
   assert.equal(out.merged, true);
   assert.equal(out.oid, "mergeoid123");
-  const mergeCall = proc.calls.find((c2) => c2.args[0] === "merge");
-  assert.ok(mergeCall.args.includes("--no-ff") && mergeCall.args.includes("feat/x"));
+  const mergeCall = r.gitCalls.find((c2) => c2.cmd === "merge");
+  // --no-ff is the contract's default and its reason: a review that approved a branch must not have
+  // that branch fast-forwarded out of the history.
+  assert.deepEqual(mergeCall.params, { path: "/repo", target: "feat/x", noFf: true });
   // the approval is consumed — a second merge without re-approval refuses
   assert.equal((await q(m, "approval")).length, 0, "approval not consumed by merge");
   assert.equal((await cmd("merge")({ target: "feat/x" })).code, "NOT_APPROVED", "re-merge must require fresh approval");

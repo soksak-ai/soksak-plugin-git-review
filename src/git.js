@@ -1,109 +1,82 @@
-// Own the git execution — run the git CLI directly through the process capability. No dependency
-// on another plugin (coupling 0; the git CLI is the stable contract). The thin runner this plugin
-// needs: root discovery, diff (name-status + numstat + hunks), branch existence, local merge.
+// The git this plugin needs, taken from the contract — not run here.
+//
+// A git runner is a spawn wrapper, an env pin, timeouts, a ref whitelist and a diff parser. Every
+// plugin that ran git kept its own copy, and a duplicated defense is a security debt: the copy
+// written slightly wrong is the one that ships, and it does not announce itself. Those rules — the
+// ref whitelist that made `--upload-pack=…` a refusal instead of a command, the three-dot range that
+// makes "what did this branch do" the right question — are stated and scored once, in
+// soksak-git-spec@1. This plugin asks whoever implements it.
+//
+// The implementer is resolved by contract, never named (C3 L2 contract-pin). The manifest declares
+// `consumes: ["soksak-git-spec@1"]` and the host's call gate reads that declaration, so no plugin id
+// appears here or in the manifest.
 
-const READ_ENV = Object.freeze({ LC_ALL: "C", LANG: "C", GIT_OPTIONAL_LOCKS: "0" });
-const WRITE_ENV = Object.freeze({ LC_ALL: "C", LANG: "C" });
-const READ_TIMEOUT_MS = 30_000;
-const WRITE_TIMEOUT_MS = 180_000;
-const NOT_REPO_RE = /not a git repository/i;
+export const GIT_CONTRACT = "soksak-git-spec@1";
 
-// git failure → canonical envelope (MESSAGE-PROTOCOL); git's own stderr is the cause.
-function gitFail(r) {
-  return { ok: false, code: "GIT_ERROR", message: r.stderr || `git exit ${r.code}` };
+// No enabled implementer is a loud refusal. A review with no git is not a review of nothing.
+export function noProvider(msg) {
+  return {
+    ok: false,
+    code: "NO_GIT_PROVIDER",
+    message: msg(
+      `no enabled plugin implements ${GIT_CONTRACT}`,
+      `${GIT_CONTRACT} 을 구현한 활성 플러그인이 없습니다`,
+    ),
+  };
 }
 
-// A ref/commit the diff and merge commands accept: a branch name, a short/long hash, or a HEAD
-// form. Rejects option-looking or path-traversing input (no leading '-', no '..').
-export function validRef(ref) {
-  if (typeof ref !== "string" || ref.length === 0) return false;
-  if (ref.startsWith("-") || ref.includes("..") || ref.endsWith("/") || ref.endsWith(".lock")) return false;
-  return /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(ref) || ref === "HEAD";
-}
+export function makeGit(app, msg) {
+  // Resolved on every call: an implementer is enabled and disabled at runtime, so a cached id is a
+  // claim about a fact that may already have changed.
+  async function provider() {
+    const out = await app.commands.execute("plugin.implementers", { contract: GIT_CONTRACT });
+    if (!out?.ok) return null;
+    const found = (out.data?.implementers ?? []).find((i) => i.status === "enabled");
+    return found?.id ?? null;
+  }
 
-// Bind the runner to a process capability (app.process). Each op resolves { ok, ... }; a failure
-// is { ok:false, code, message }.
-export function makeGit(processApi) {
-  function run({ cwd, args, write = false, timeoutMs }) {
-    return new Promise((resolve, reject) => {
-      const limit = timeoutMs ?? (write ? WRITE_TIMEOUT_MS : READ_TIMEOUT_MS);
-      const dec = new TextDecoder();
-      let out = "";
-      let err = "";
-      let done = false;
-      let timer = null;
-      processApi
-        .spawn("git", args, { cwd, env: write ? { ...WRITE_ENV } : { ...READ_ENV } })
-        .then((handle) => {
-          const subs = [];
-          const finish = (fn, v) => {
-            if (done) return;
-            done = true;
-            if (timer) clearTimeout(timer);
-            for (const s of subs) s.dispose();
-            fn(v);
-          };
-          timer = setTimeout(() => {
-            void processApi.kill(handle);
-            finish(reject, new Error(`git ${args[0] ?? ""} timeout ${limit}ms`));
-          }, limit);
-          subs.push(
-            processApi.onData(handle, (b) => (out += dec.decode(b, { stream: true }))),
-            processApi.onStderr(handle, (b) => (err += new TextDecoder().decode(b))),
-            processApi.onExit(handle, (code) => finish(resolve, { code, stdout: out, stderr: err.trim() })),
-          );
-        })
-        .catch((e) => {
-          if (!done) {
-            done = true;
-            if (timer) clearTimeout(timer);
-            reject(e instanceof Error ? e : new Error(String(e)));
-          }
-        });
-    });
+  async function call(cmd, params) {
+    const id = await provider();
+    if (!id) return noProvider(msg);
+    return app.commands.execute(`plugin.${id}.${cmd}`, params);
   }
 
   return {
-    run,
-    // Tri-state repository root discovery.
+    call,
+
+    // Tri-state root discovery, and the refusal's code travels with it: "git failed" and "there is
+    // no git" are different facts.
     async root(cwd) {
-      try {
-        const r = await run({ cwd, args: ["rev-parse", "--show-toplevel"] });
-        if (r.code === 0) return { state: "repo", root: r.stdout.trim() };
-        if (NOT_REPO_RE.test(r.stderr)) return { state: "not-repo" };
-        return { state: "error", error: r.stderr };
-      } catch (e) {
-        return { state: "error", error: String(e?.message ?? e) };
-      }
+      const out = await call("root", { path: cwd });
+      if (!out.ok) return { state: "error", error: out.message, code: out.code };
+      return out.data ?? { state: "error", error: "empty answer", code: "GIT_ERROR" };
     },
-    // name-status of base...target (changes on target since it diverged from base).
-    async nameStatus({ repoRoot, base, target }) {
-      const r = await run({ cwd: repoRoot, args: ["diff", "--name-status", `${base}...${target}`] });
-      if (r.code !== 0) return gitFail(r);
-      return { ok: true, stdout: r.stdout };
+
+    // What the branch changed since it diverged (the three-dot range base...target). The contract
+    // returns the file list already merged with its line counts — the name-status and numstat
+    // parsers this plugin used to carry are the implementer's business now.
+    async files({ repoRoot, base, target }) {
+      const out = await call("diff.files", { path: repoRoot, base, target });
+      return out.ok ? { ok: true, files: out.data?.files ?? [] } : out;
     },
-    async numstat({ repoRoot, base, target }) {
-      const r = await run({ cwd: repoRoot, args: ["diff", "--numstat", `${base}...${target}`] });
-      if (r.code !== 0) return gitFail(r);
-      return { ok: true, stdout: r.stdout };
-    },
-    // unified diff hunks of base...target, optionally narrowed to one file.
+
+    // The unified diff of the same range, optionally narrowed to one file.
     async hunks({ repoRoot, base, target, file }) {
-      const args = ["diff", `${base}...${target}`];
-      if (typeof file === "string" && file) args.push("--", file);
-      const r = await run({ cwd: repoRoot, args });
-      if (r.code !== 0) return gitFail(r);
-      return { ok: true, diff: r.stdout };
+      const out = await call("diff.range", { path: repoRoot, base, target, ...(file ? { file } : {}) });
+      return out.ok ? { ok: true, diff: out.data?.diff ?? "" } : out;
     },
-    // Local merge of target into the branch checked out at repoRoot (the base). Returns the new HEAD.
+
+    // What is checked out at the repository root — the base a review merges into.
+    async head(repoRoot) {
+      const out = await call("head", { path: repoRoot });
+      return out.ok ? { ok: true, ...(out.data ?? {}) } : out;
+    },
+
+    // Merge the approved target into what is checked out. A conflict comes back as the contract's
+    // GIT_ERROR carrying git's own text — this plugin does not resolve, abort, or commit its way out.
     async merge({ repoRoot, target, noFf = true }) {
-      const args = ["merge"];
-      if (noFf) args.push("--no-ff");
-      args.push("-m", `Merge ${target}`, "--", target);
-      const r = await run({ cwd: repoRoot, args, write: true });
-      if (r.code !== 0) return gitFail(r);
-      const head = await run({ cwd: repoRoot, args: ["rev-parse", "HEAD"] });
-      return { ok: true, oid: head.stdout.trim() };
+      const out = await call("merge", { path: repoRoot, target, noFf });
+      return out.ok ? { ok: true, oid: out.data?.oid } : out;
     },
   };
 }
