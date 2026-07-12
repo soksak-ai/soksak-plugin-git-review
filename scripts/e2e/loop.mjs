@@ -39,6 +39,13 @@ const step = (n, s) => console.log(`\n[${n}] ${s}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const uiTreeAddrs = (tree) =>
   ((tree.data?.nodes || tree.data || []).map((n) => (typeof n === "string" ? n : n.address))).filter((a) => typeof a === "string");
+// Every view in the window's active project (each carries its owning plugin id).
+function viewsOf(win) {
+  const t = sok("state.tree", undefined, { window: win });
+  const pr = (t.data?.projects || []).find((p) => p.active) || {};
+  return (pr.spaces || []).flatMap((s) => (s.panels || []).flatMap((pn) => pn.views || []));
+}
+const TERMINAL_PLUGIN = "soksak-plugin-terminal-xterm";
 
 function ensureFixture() {
   if (!existsSync(join(REPO, ".git"))) {
@@ -108,9 +115,19 @@ async function main() {
   const pre = sok(`${PLUGIN}.diff.files`, { target: TARGET, path: REPO }, { window: win });
   assert.ok(pre.ok && (pre.data.files || []).length >= 2, `fixture diff empty (poisoned) — target has no changes vs base: ${JSON.stringify(pre.data)}`);
 
-  step("view", "open the Review view in the worktree window");
-  sok("plugin.view.open", { view: "soksak-plugin-git-review.view", placement: "content" }, { window: win });
-  await sleep(800);
+  step("view", "open the Review view; reclaim leftover terminal panes; record the surface baseline");
+  const vOpen = sok("plugin.view.open", { view: "soksak-plugin-git-review.view", placement: "content" }, { window: win });
+  assert.ok(vOpen.ok, `plugin.view.open: ${vOpen.message}`);
+  const reviewView = vOpen.data.viewId;
+  assert.ok(reviewView, "no review view id");
+  // Reclaim terminal panes left behind by earlier runs — an accumulating UI surface is fake
+  // idempotency too (the git state and comment store are not the only things a run must reclaim).
+  for (const v of viewsOf(win)) {
+    if (v.plugin === TERMINAL_PLUGIN) sok("view.close", { view: v.id }, { window: win });
+  }
+  await sleep(600);
+  const baseline = viewsOf(win).length; // the Review view, with every terminal reclaimed
+  assert.ok(baseline >= 1, "no baseline view after reclaiming terminals");
 
   // ── GATE ① diff surface ─────────────────────────────────────────────────────
   step("①.diff", "diff.files/read return the target's changes; the view exposes file nodes");
@@ -165,6 +182,24 @@ async function main() {
   const norm = (s) => String(s).replace(/\s+/g, "");
   assert.ok(norm(buf).includes(norm("please handle the null case")), `payload not in pane buffer:\n${buf}`);
 
+  // ── GATE ⑥ snapshot — the Review view, front and populated ───────────────────
+  // Captured BEFORE the merge: that is the only state where the review surface is meaningful
+  // (files still differ from base, comments present, approval pending). A capture of an empty
+  // terminal proves nothing — the snapshot must show what this gate claims, so the node checks
+  // below refuse to capture a hollow frame.
+  step("⑥.snapshot", `bring the Review view to the front, populated, and capture → ${SNAP}`);
+  assert.ok(sok("view.activate", { view: reviewView }, { window: win }).ok, "view.activate(review) failed");
+  await sleep(600);
+  const shotAddrs0 = uiTreeAddrs(sok("ui.tree", undefined, { window: win }));
+  const rf2 = shotAddrs0.find((a) => a.endsWith("/node/refresh") && a.includes("git-review"));
+  if (rf2) sok("ui.input.click", { address: rf2 }, { window: win }); // render against current state
+  await sleep(1200);
+  const shot = uiTreeAddrs(sok("ui.tree", undefined, { window: win }));
+  assert.ok(shot.some((a) => a.includes("/node/file/")), "refusing a hollow snapshot: review view shows no file rows");
+  assert.ok(shot.some((a) => a.includes("/node/comment/")), "refusing a hollow snapshot: review view shows no comment rows");
+  assert.ok(shot.some((a) => a.endsWith("/node/approve")), "refusing a hollow snapshot: no approve control");
+  assert.ok(sok("window.snapshot", { path: SNAP }, { window: win }).ok, "snapshot failed");
+
   // ── GATE ④ approve→merge (a real merge commit) ───────────────────────────────
   step("④.merge", "resolve comments, approve, then local-merge the target into main");
   for (const c of sok(`${PLUGIN}.comment.list`, { target: TARGET, status: "open" }, { window: win }).data.comments || []) {
@@ -186,9 +221,17 @@ async function main() {
   const viol = (conf.data.commands?.missing || []).concat(conf.data.commands?.messagesMissing || []);
   assert.equal(viol.length, 0, `conformance violations: ${JSON.stringify(viol)}`);
 
-  // ── GATE ⑥ snapshot ──────────────────────────────────────────────────────────
-  step("⑥.snapshot", `capture the review window → ${SNAP}`);
-  assert.ok(sok("window.snapshot", { path: SNAP }, { window: win }).ok, "snapshot failed");
+  // ── teardown — reclaim the surface this run created (idempotent) ──────────────
+  step("teardown", "reclaim the terminal pane this run opened; the surface returns to baseline");
+  sok("view.close", { view: pane }, { window: win }); // idempotent: an absent view is a no-op
+  await sleep(600);
+  const after = viewsOf(win);
+  assert.equal(
+    after.filter((v) => v.plugin === TERMINAL_PLUGIN).length,
+    0,
+    "terminal pane not reclaimed — tabs would accumulate one per run",
+  );
+  assert.equal(after.length, baseline, `surface not back to baseline (${after.length} vs ${baseline})`);
 
   console.log(`\nALL GATES PASSED. snapshot: ${SNAP}`);
 }
