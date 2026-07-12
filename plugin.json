@@ -88,6 +88,13 @@
         }
       },
       {
+        "name": "approve.revoke",
+        "title": {
+          "ko": "승인을 철회합니다",
+          "en": "Withdraws an approval"
+        }
+      },
+      {
         "name": "merge",
         "title": {
           "en": "Merge the approved target",

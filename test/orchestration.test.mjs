@@ -132,6 +132,23 @@ test("approve — records approval keyed by target", async () => {
   assert.equal(rows[0].target, "feat/x");
 });
 
+test("approve.revoke — a withdrawn approval sends merge back to refusing", async () => {
+  const { m, proc, cmd } = boot();
+  await cmd("approve")({ target: "feat/x" });
+  const out = await cmd("approve.revoke")({ target: "feat/x" });
+  assert.equal(out.revoked, true);
+  assert.equal((await q(m, "approval")).length, 0, "the approval record must be gone, not merely flagged");
+  const merged = await cmd("merge")({ target: "feat/x" });
+  assert.equal(merged.code, "NOT_APPROVED", "an approval taken back must stop being a key to merge");
+  assert.equal(proc.calls.filter((c) => c.args[0] === "merge").length, 0);
+});
+
+test("approve.revoke — revoking what was never approved is a no-op", async () => {
+  const { cmd } = boot();
+  assert.equal((await cmd("approve.revoke")({ target: "feat/x" })).revoked, false);
+  assert.equal((await cmd("approve.revoke")({})).code, "INVALID_PARAMS");
+});
+
 test("merge — refuses without approval (no git merge)", async () => {
   const { proc, cmd } = boot();
   const out = await cmd("merge")({ target: "feat/x" });

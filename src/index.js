@@ -234,6 +234,26 @@ const index_default = {
       },
     });
 
+    reg("approve.revoke", {
+      description:
+        "Withdraw an approval. A reviewer who has changed their mind must be able to take it back, and a merge that was never re-approved must go back to refusing NOT_APPROVED. Idempotent — revoking an approval that was never given (or that a merge already consumed) is a no-op.",
+      triggers: { ko: "승인 철회 취소" },
+      params: {
+        target: { type: "string", description: "Branch/worktree whose approval to withdraw", required: true },
+      },
+      returns: "{ revoked, target }",
+      examples: ['sok plugin.soksak-plugin-git-review.approve.revoke \'{"target":"feat/login"}\''],
+      message: (d) => msg(`Approval withdrawn for ${d.target}`, `${d.target} 승인 철회`),
+      handler: async (p) => {
+        const target = typeof p.target === "string" ? p.target.trim() : "";
+        if (!target) return err("INVALID_PARAMS", msg("target required", "target 필요"));
+        const had = await approvalOf(target);
+        if (!had) return { revoked: false, target };
+        await app.data.delete(COLL_APPROVAL, targetKey(target), { scope: SCOPE });
+        return { revoked: true, target };
+      },
+    });
+
     // ── merge — local-merge an approved target once comments are resolved ────────
     reg("merge", {
       danger: "destructive",

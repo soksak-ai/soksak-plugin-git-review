@@ -405,6 +405,24 @@ var index_default = {
         return { approved: true, target };
       }
     });
+    reg("approve.revoke", {
+      description: "Withdraw an approval. A reviewer who has changed their mind must be able to take it back, and a merge that was never re-approved must go back to refusing NOT_APPROVED. Idempotent \u2014 revoking an approval that was never given (or that a merge already consumed) is a no-op.",
+      triggers: { ko: "\uC2B9\uC778 \uCCA0\uD68C \uCDE8\uC18C" },
+      params: {
+        target: { type: "string", description: "Branch/worktree whose approval to withdraw", required: true }
+      },
+      returns: "{ revoked, target }",
+      examples: [`sok plugin.soksak-plugin-git-review.approve.revoke '{"target":"feat/login"}'`],
+      message: (d) => msg(`Approval withdrawn for ${d.target}`, `${d.target} \uC2B9\uC778 \uCCA0\uD68C`),
+      handler: async (p) => {
+        const target = typeof p.target === "string" ? p.target.trim() : "";
+        if (!target) return err("INVALID_PARAMS", msg("target required", "target \uD544\uC694"));
+        const had = await approvalOf(target);
+        if (!had) return { revoked: false, target };
+        await app.data.delete(COLL_APPROVAL, targetKey(target), { scope: SCOPE });
+        return { revoked: true, target };
+      }
+    });
     reg("merge", {
       danger: "destructive",
       description: "Merge a target branch into the branch checked out at the repository (local, --no-ff). Refuses without an approval record (NOT_APPROVED) and while the target has open comments (UNRESOLVED_COMMENTS). The approval is consumed on a successful merge \u2014 re-merging requires a fresh approval. PR/remote is out of scope.",
