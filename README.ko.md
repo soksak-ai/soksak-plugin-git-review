@@ -4,8 +4,8 @@
 코멘트를 대상 터미널에 주입하는 명령, 그리고 승인→머지 생명주기.
 
 git 은 실행하지 않는다. 저장소 판별, 브랜치의 변경(삼점 `base...target`), unified diff, 체크아웃된
-HEAD, 머지 — 전부 **`soksak-git-spec@1`** 에서 온다. 그 구현체는 **계약으로 찾는다 — 이름으로 찾지
-않는다**: 매니페스트가 `consumes: ["soksak-git-spec@1"]` 를 선언하고 구현체는 `plugin.implementers`
+HEAD, 머지 — 전부 **`soksak-spec-plugin-git`** 에서 온다. 그 구현체는 **계약으로 찾는다 — 이름으로 찾지
+않는다**: 매니페스트가 `consumes: ["soksak-spec-plugin-git"]` 를 선언하고 구현체는 `plugin.implementers`
 로 해소하며, 코드에도 매니페스트에도 플러그인 id 는 등장하지 않는다. 활성 구현체가 없으면 loud 하게
 거부한다(`NO_GIT_PROVIDER`).
 

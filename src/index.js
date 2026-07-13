@@ -78,7 +78,7 @@ const index_default = {
         const base = baseParam(p);
         const rr = await resolveRepoRoot(repoPathParam(p));
         if (!rr.ok) return rr.out;
-        // The ref whitelist is the contract's (soksak-git-spec@1 §3) — a hostile ref is refused there,
+        // The ref whitelist is the contract's (soksak-spec-plugin-git §3) — a hostile ref is refused there,
         // before anything runs, and its refusal comes back as INVALID_REF. Re-deriving that check here
         // would be a second copy of a security rule, which is the debt this contract exists to end.
         const out = await git.files({ repoRoot: rr.root, base, target });

@@ -2,7 +2,7 @@
 //
 // The parsing that used to be tested here — name-status into per-file status, numstat into line
 // counts, the merge of the two — belongs to the git domain, and it is now the contract's
-// (soksak-git-spec@1 §7.3, scored by soksak-contract-git). A consumer that re-parses git's output
+// (soksak-spec-plugin-git §7.3, scored by soksak-contract-git). A consumer that re-parses git's output
 // has taken the domain back, and taken its bugs with it.
 import test from "node:test";
 import assert from "node:assert/strict";

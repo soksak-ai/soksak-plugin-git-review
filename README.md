@@ -5,9 +5,9 @@ deterministic record contract, a command to send comments into the target's term
 approve-then-merge lifecycle.
 
 It runs no git. Repository discovery, the branch's changes (the three-dot range `base...target`),
-the unified diff, the checked-out HEAD, and the merge all come from **`soksak-git-spec@1`**, and the
+the unified diff, the checked-out HEAD, and the merge all come from **`soksak-spec-plugin-git`**, and the
 plugin that implements it is found **by contract, never by name**: the manifest declares
-`consumes: ["soksak-git-spec@1"]`, the implementer is resolved through `plugin.implementers`, and no
+`consumes: ["soksak-spec-plugin-git"]`, the implementer is resolved through `plugin.implementers`, and no
 plugin id appears in this plugin's code or manifest. No enabled implementer is a loud refusal
 (`NO_GIT_PROVIDER`).
 

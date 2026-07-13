@@ -5,13 +5,13 @@
 // written slightly wrong is the one that ships, and it does not announce itself. Those rules — the
 // ref whitelist that made `--upload-pack=…` a refusal instead of a command, the three-dot range that
 // makes "what did this branch do" the right question — are stated and scored once, in
-// soksak-git-spec@1. This plugin asks whoever implements it.
+// soksak-spec-plugin-git. This plugin asks whoever implements it.
 //
 // The implementer is resolved by contract, never named (C3 L2 contract-pin). The manifest declares
-// `consumes: ["soksak-git-spec@1"]` and the host's call gate reads that declaration, so no plugin id
+// `consumes: ["soksak-spec-plugin-git"]` and the host's call gate reads that declaration, so no plugin id
 // appears here or in the manifest.
 
-export const GIT_CONTRACT = "soksak-git-spec@1";
+export const GIT_CONTRACT = "soksak-spec-plugin-git";
 
 // No enabled implementer is a loud refusal. A review with no git is not a review of nothing.
 export function noProvider(msg) {

@@ -1,7 +1,7 @@
 // The one diff concern this plugin still owns: a stable, address-safe key for a file path.
 //
 // The parsing that used to live here — name-status into per-file status, numstat into line counts,
-// the merge of the two — is the git domain's, and it is now the contract's (soksak-git-spec@1
+// the merge of the two — is the git domain's, and it is now the contract's (soksak-spec-plugin-git
 // §7.3): diff.files answers with the file list already merged. A consumer that re-parses git's
 // output has taken the domain back, and taken its bugs with it.
 
