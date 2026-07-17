@@ -3,13 +3,12 @@
   "id": "soksak-plugin-git-review",
   "name": {
     "en": "Git Review",
-    "ko": "깃 리뷰"
+    "ko": "\uae43 \ub9ac\ubdf0"
   },
   "version": "0.0.1",
-  "repo": "https://github.com/soksak-ai/soksak-plugin-git-review.git",
   "description": {
     "en": "Review a branch or worktree's changes: a diff surface, comments as a deterministic record contract, injecting comments into the target's terminal, and approve then local-merge. Git runs directly.",
-    "ko": "브랜치·워크트리 변경을 리뷰 — diff 표면, 결정적 레코드 계약으로서의 코멘트, 코멘트를 대상 터미널에 주입, 승인 후 로컬 머지. git 은 직접 실행."
+    "ko": "\ube0c\ub79c\uce58\u00b7\uc6cc\ud06c\ud2b8\ub9ac \ubcc0\uacbd\uc744 \ub9ac\ubdf0 \u2014 diff \ud45c\uba74, \uacb0\uc815\uc801 \ub808\ucf54\ub4dc \uacc4\uc57d\uc73c\ub85c\uc11c\uc758 \ucf54\uba58\ud2b8, \ucf54\uba58\ud2b8\ub97c \ub300\uc0c1 \ud130\ubbf8\ub110\uc5d0 \uc8fc\uc785, \uc2b9\uc778 \ud6c4 \ub85c\uceec \uba38\uc9c0. git \uc740 \uc9c1\uc811 \uc2e4\ud589."
   },
   "entry": "main.js",
   "permissions": [
@@ -26,49 +25,49 @@
         "name": "diff.files",
         "title": {
           "en": "List changed files",
-          "ko": "변경 파일 목록"
+          "ko": "\ubcc0\uacbd \ud30c\uc77c \ubaa9\ub85d"
         }
       },
       {
         "name": "diff.read",
         "title": {
           "en": "Read the diff hunks",
-          "ko": "diff 본문 조회"
+          "ko": "diff \ubcf8\ubb38 \uc870\ud68c"
         }
       },
       {
         "name": "comment.add",
         "title": {
           "en": "Add a review comment",
-          "ko": "리뷰 코멘트 추가"
+          "ko": "\ub9ac\ubdf0 \ucf54\uba58\ud2b8 \ucd94\uac00"
         }
       },
       {
         "name": "comment.list",
         "title": {
           "en": "List review comments",
-          "ko": "리뷰 코멘트 목록"
+          "ko": "\ub9ac\ubdf0 \ucf54\uba58\ud2b8 \ubaa9\ub85d"
         }
       },
       {
         "name": "comment.resolve",
         "title": {
           "en": "Resolve a comment",
-          "ko": "코멘트 해소"
+          "ko": "\ucf54\uba58\ud2b8 \ud574\uc18c"
         }
       },
       {
         "name": "comment.reopen",
         "title": {
           "en": "Reopen a comment",
-          "ko": "코멘트 재개"
+          "ko": "\ucf54\uba58\ud2b8 \uc7ac\uac1c"
         }
       },
       {
         "name": "comment.remove",
         "title": {
           "en": "Remove a comment",
-          "ko": "코멘트 삭제"
+          "ko": "\ucf54\uba58\ud2b8 \uc0ad\uc81c"
         },
         "danger": "destructive"
       },
@@ -76,20 +75,20 @@
         "name": "comment.send",
         "title": {
           "en": "Send comments to the target terminal",
-          "ko": "코멘트를 대상 터미널로 전송"
+          "ko": "\ucf54\uba58\ud2b8\ub97c \ub300\uc0c1 \ud130\ubbf8\ub110\ub85c \uc804\uc1a1"
         }
       },
       {
         "name": "approve",
         "title": {
           "en": "Approve the target's changes",
-          "ko": "대상 변경 승인"
+          "ko": "\ub300\uc0c1 \ubcc0\uacbd \uc2b9\uc778"
         }
       },
       {
         "name": "approve.revoke",
         "title": {
-          "ko": "승인을 철회합니다",
+          "ko": "\uc2b9\uc778\uc744 \ucca0\ud68c\ud569\ub2c8\ub2e4",
           "en": "Withdraws an approval"
         }
       },
@@ -97,7 +96,7 @@
         "name": "merge",
         "title": {
           "en": "Merge the approved target",
-          "ko": "승인된 대상 머지"
+          "ko": "\uc2b9\uc778\ub41c \ub300\uc0c1 \uba38\uc9c0"
         },
         "danger": "destructive"
       }
@@ -107,9 +106,9 @@
         "id": "view",
         "title": {
           "en": "Review",
-          "ko": "리뷰"
+          "ko": "\ub9ac\ubdf0"
         },
-        "icon": "◑",
+        "icon": "\u25d1",
         "placements": [
           "sidebar-right",
           "content"
@@ -129,35 +128,35 @@
         "id": "refresh",
         "description": {
           "en": "Refresh button (reload files + comments)",
-          "ko": "새로고침 버튼(파일·코멘트 재로드)"
+          "ko": "\uc0c8\ub85c\uace0\uce68 \ubc84\ud2bc(\ud30c\uc77c\u00b7\ucf54\uba58\ud2b8 \uc7ac\ub85c\ub4dc)"
         }
       },
       {
         "id": "file",
         "description": {
           "en": "Changed file row (click = show its diff). data-node=\"file/<key>\"",
-          "ko": "변경 파일 행(클릭=diff 표시). data-node=\"file/<키>\""
+          "ko": "\ubcc0\uacbd \ud30c\uc77c \ud589(\ud074\ub9ad=diff \ud45c\uc2dc). data-node=\"file/<\ud0a4>\""
         }
       },
       {
         "id": "comment",
         "description": {
           "en": "Comment row. data-node=\"comment/<id>\"",
-          "ko": "코멘트 행. data-node=\"comment/<id>\""
+          "ko": "\ucf54\uba58\ud2b8 \ud589. data-node=\"comment/<id>\""
         }
       },
       {
         "id": "resolve",
         "description": {
           "en": "Per-comment resolve toggle. data-node=\"resolve/<id>\"",
-          "ko": "코멘트별 해소 토글. data-node=\"resolve/<id>\""
+          "ko": "\ucf54\uba58\ud2b8\ubcc4 \ud574\uc18c \ud1a0\uae00. data-node=\"resolve/<id>\""
         }
       },
       {
         "id": "approve",
         "description": {
           "en": "Approve button for the target",
-          "ko": "대상 승인 버튼"
+          "ko": "\ub300\uc0c1 \uc2b9\uc778 \ubc84\ud2bc"
         }
       }
     ]
