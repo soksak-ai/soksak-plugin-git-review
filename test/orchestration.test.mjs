@@ -47,7 +47,7 @@ function router({ git = {}, implementers } = {}) {
   const enabled = implementers ?? [{ id: PROVIDER, version: "1.0.0", status: "enabled" }];
   const fn = async (name, params) => {
     calls.push({ name, params });
-    if (name === "plugin.implementers") return ok({ contract: params?.contract, implementers: enabled });
+    if (name === "plugin.implementers") return ok({ id: params?.id, implementers: enabled });
     if (name.startsWith(`plugin.${PROVIDER}.`)) {
       const cmd = name.slice(`plugin.${PROVIDER}.`.length);
       gitCalls.push({ cmd, params });
@@ -83,7 +83,7 @@ test("diff.files — asks the provider for the branch's changes and returns its 
   const call = r.gitCalls.find((c) => c.cmd === "diff.files");
   assert.deepEqual(call.params, { path: "/repo", base: "main", target: "feat/x" });
   assert.ok(
-    r.calls.some((c) => c.name === "plugin.implementers" && c.params?.contract === CONTRACT),
+    r.calls.some((c) => c.name === "plugin.implementers" && c.params?.id === CONTRACT),
     "the provider was never resolved by contract",
   );
   for (const c of r.calls) assert.ok(!c.name.includes("git-core"), `an implementer is named: ${c.name}`);
