@@ -6,10 +6,11 @@ approve-then-merge lifecycle.
 
 It runs no git. Repository discovery, the branch's changes (the three-dot range `base...target`),
 the unified diff, the checked-out HEAD, and the merge all come from **`soksak-spec-plugin-git`**, and the
-plugin that implements it is found **by contract, never by name**: the manifest declares
-`consumes: ["soksak-spec-plugin-git"]`, the implementer is resolved through `plugin.implementers`, and no
-plugin id appears in this plugin's code or manifest. No enabled implementer is a loud refusal
-(`NO_GIT_PROVIDER`).
+plugin that implements it is found **by contract identity, never by name**: the manifest declares
+`consumes: [{ id: "soksak-spec-plugin-git", range: "0.0.1" }]` and the implementer is resolved through
+`plugin.implementers` called with the identity `{ id: "soksak-spec-plugin-git" }` — the version-free
+contract id, no range in the discovery call. No plugin id appears in this plugin's code or manifest, and
+no enabled implementer is a loud refusal (`NO_GIT_PROVIDER`).
 
 Because it runs no git, it holds **no `process` permission** — it cannot spawn anything. The ref
 whitelist that turns `--upload-pack=…` into a refusal instead of a command, and the diff parsing
