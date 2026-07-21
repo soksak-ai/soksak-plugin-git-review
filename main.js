@@ -109,6 +109,57 @@ function makeGit(app, msg) {
   };
 }
 
+// src/railBridge.js
+var containers = /* @__PURE__ */ new Map();
+var subs = /* @__PURE__ */ new Map();
+function notify(viewId) {
+  for (const fn of subs.get(viewId) ?? []) fn();
+}
+function registerRailContainer(viewId, slot, el) {
+  let entry = containers.get(viewId);
+  if (!entry) containers.set(viewId, entry = /* @__PURE__ */ new Map());
+  entry.set(slot, el);
+  notify(viewId);
+  return () => {
+    const cur = containers.get(viewId);
+    if (!cur || cur.get(slot) !== el) return;
+    cur.delete(slot);
+    if (cur.size === 0) containers.delete(viewId);
+    notify(viewId);
+  };
+}
+function bindRailSlot(viewId, slot, el, { adopt, restore }) {
+  if (!viewId) return () => {
+  };
+  let placed = null;
+  const sync = () => {
+    const target = containers.get(viewId)?.get(slot) ?? null;
+    if (target === placed) return;
+    if (target) {
+      adopt(el);
+      target.appendChild(el);
+    } else {
+      restore(el);
+    }
+    placed = target;
+  };
+  let set = subs.get(viewId);
+  if (!set) subs.set(viewId, set = /* @__PURE__ */ new Set());
+  set.add(sync);
+  sync();
+  return () => {
+    const s = subs.get(viewId);
+    if (s) {
+      s.delete(sync);
+      if (s.size === 0) subs.delete(viewId);
+    }
+    if (placed) {
+      restore(el);
+      placed = null;
+    }
+  };
+}
+
 // src/index.js
 var COLL_COMMENT = "comment";
 var COLL_APPROVAL = "approval";
@@ -357,10 +408,39 @@ var index_default = {
     });
     const cleanups = /* @__PURE__ */ new Map();
     ctx.subscriptions.push(app.ui.registerView("view", mkView(app, git, { loadComments, approvalOf, msg, DEFAULT_BASE }, cleanups)));
+    ctx.subscriptions.push(app.ui.registerView("files", mkRailView("files", msg("No bound review view", "\uACB0\uBD80\uB41C \uB9AC\uBDF0 \uBDF0 \uC5C6\uC74C"))));
+    ctx.subscriptions.push(app.ui.registerView("comments", mkRailView("comments", msg("No bound review view", "\uACB0\uBD80\uB41C \uB9AC\uBDF0 \uBDF0 \uC5C6\uC74C"))));
   },
   deactivate() {
   }
 };
+function mkRailView(slot, emptyText) {
+  const cleanups = /* @__PURE__ */ new Map();
+  return {
+    mount(container, vctx) {
+      cleanups.get(container)?.();
+      container.replaceChildren();
+      const host = h(
+        "div",
+        "display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden;font-size:12px;color:var(--fg);background:var(--bg)"
+      );
+      container.append(host);
+      const bound = vctx?.boundViewId ?? null;
+      if (!bound) {
+        host.append(h("div", "padding:12px;color:var(--fg3);text-align:center;font-size:11px", emptyText));
+        cleanups.set(container, () => {
+        });
+        return;
+      }
+      cleanups.set(container, registerRailContainer(bound, slot, host));
+    },
+    unmount(container) {
+      cleanups.get(container)?.();
+      cleanups.delete(container);
+      container.replaceChildren();
+    }
+  };
+}
 function mkView(app, git, deps, cleanups) {
   const { loadComments, approvalOf, msg, DEFAULT_BASE: DEFAULT_BASE2 } = deps;
   return {
@@ -381,11 +461,33 @@ function mkView(app, git, deps, cleanups) {
       right.append(approveBtn, refreshBtn);
       bar.append(title, right);
       const errEl = h("div", "display:none;padding:8px 10px;color:var(--danger);font-size:11px;white-space:pre-wrap;word-break:break-all;flex:0 0 auto");
-      const listEl = h("div", "flex:0 1 auto;max-height:35%;overflow:auto;padding:5px 0");
+      const LIST_INLINE = "flex:0 1 auto;max-height:35%;overflow:auto;padding:5px 0";
+      const COMMENTS_INLINE = "flex:0 1 auto;max-height:30%;overflow:auto;border-top:1px solid var(--bd);padding:5px 0";
+      const RAIL_FILL = "flex:1 1 auto;min-height:0;overflow:auto;padding:5px 0";
+      const restyle = (el, css) => {
+        const display = el.style.display;
+        el.style.cssText = css;
+        el.style.display = display;
+      };
+      const listEl = h("div", LIST_INLINE);
       const diffEl = h("div", "flex:1 1 auto;min-height:0;overflow:auto;padding:8px 10px;border-top:1px solid var(--bd);font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.5;white-space:pre");
-      const commentsEl = h("div", "flex:0 1 auto;max-height:30%;overflow:auto;border-top:1px solid var(--bd);padding:5px 0");
+      const commentsEl = h("div", COMMENTS_INLINE);
       wrap.append(bar, errEl, listEl, diffEl, commentsEl);
       container.append(wrap);
+      const unbindFiles = bindRailSlot(vctx.viewId ?? null, "files", listEl, {
+        adopt: (el) => restyle(el, RAIL_FILL),
+        restore: (el) => {
+          restyle(el, LIST_INLINE);
+          wrap.insertBefore(el, diffEl);
+        }
+      });
+      const unbindComments = bindRailSlot(vctx.viewId ?? null, "comments", commentsEl, {
+        adopt: (el) => restyle(el, RAIL_FILL),
+        restore: (el) => {
+          restyle(el, COMMENTS_INLINE);
+          wrap.appendChild(el);
+        }
+      });
       const root = vctx.root;
       let target = null;
       let selected = null;
@@ -466,7 +568,7 @@ function mkView(app, git, deps, cleanups) {
       };
       refreshBtn.onclick = () => void render();
       void render();
-      const subs = [
+      const subs2 = [
         app.data.watch(COLL_COMMENT, { scope: SCOPE }, () => void loadComments_()),
         app.data.watch(COLL_APPROVAL, { scope: SCOPE }, () => void render()),
         app.events.on("command.finished", (e) => {
@@ -475,7 +577,9 @@ function mkView(app, git, deps, cleanups) {
         })
       ];
       cleanups.set(container, () => {
-        for (const s of subs) s.dispose();
+        for (const s of subs2) s.dispose();
+        unbindFiles();
+        unbindComments();
       });
     },
     unmount(container) {

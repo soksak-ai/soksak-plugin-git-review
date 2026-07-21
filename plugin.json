@@ -120,6 +120,42 @@
           "changed",
           "approved",
           "error"
+        ],
+        "sidebar": {
+          "left": [
+            {
+              "ref": "self.files",
+              "instance": "per-view"
+            }
+          ],
+          "right": [
+            {
+              "ref": "self.comments",
+              "instance": "per-view"
+            }
+          ]
+        }
+      },
+      {
+        "id": "files",
+        "title": {
+          "en": "Changed Files",
+          "ko": "변경 파일"
+        },
+        "icon": "≣",
+        "placements": [
+          "rail"
+        ]
+      },
+      {
+        "id": "comments",
+        "title": {
+          "en": "Review Comments",
+          "ko": "리뷰 코멘트"
+        },
+        "icon": "💬",
+        "placements": [
+          "rail"
         ]
       }
     ],

@@ -5,6 +5,7 @@
 import { nodeKey } from "./diff.js";
 import { normalizeComment, targetKey, sortComments, formatCommentPayload } from "./comment.js";
 import { makeGit } from "./git.js";
+import { registerRailContainer, bindRailSlot } from "./railBridge.js";
 
 const COLL_COMMENT = "comment";
 const COLL_APPROVAL = "approval";
@@ -286,10 +287,44 @@ const index_default = {
     // ── The review view (DOM trio) ──────────────────────────────────────────────
     const cleanups = new Map();
     ctx.subscriptions.push(app.ui.registerView("view", mkView(app, git, { loadComments, approvalOf, msg, DEFAULT_BASE }, cleanups)));
+    // Ejected rail views — each owns only a container; the bound review mount moves its
+    // list element in (single state owner, no duplicate truth). Unbound = static notice.
+    ctx.subscriptions.push(app.ui.registerView("files", mkRailView("files", msg("No bound review view", "결부된 리뷰 뷰 없음"))));
+    ctx.subscriptions.push(app.ui.registerView("comments", mkRailView("comments", msg("No bound review view", "결부된 리뷰 뷰 없음"))));
   },
 
   deactivate() {},
 };
+
+// A rail view — owns only a container and registers it under the bound view id. The content
+// (file list / comment list) is moved in by the bound review mount via the rail bridge.
+function mkRailView(slot, emptyText) {
+  const cleanups = new Map();
+  return {
+    mount(container, vctx) {
+      cleanups.get(container)?.();
+      container.replaceChildren();
+      const host = h(
+        "div",
+        "display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden;" +
+          "font-size:12px;color:var(--fg);background:var(--bg)",
+      );
+      container.append(host);
+      const bound = vctx?.boundViewId ?? null;
+      if (!bound) {
+        host.append(h("div", "padding:12px;color:var(--fg3);text-align:center;font-size:11px", emptyText));
+        cleanups.set(container, () => {});
+        return;
+      }
+      cleanups.set(container, registerRailContainer(bound, slot, host));
+    },
+    unmount(container) {
+      cleanups.get(container)?.();
+      cleanups.delete(container);
+      container.replaceChildren();
+    },
+  };
+}
 
 // The review view — target = current branch of the mounted project's root, base = main. Renders the
 // changed-file list, the selected file's diff, the target's comments, and an approve control.
@@ -314,11 +349,39 @@ function mkView(app, git, deps, cleanups) {
       bar.append(title, right);
 
       const errEl = h("div", "display:none;padding:8px 10px;color:var(--danger);font-size:11px;white-space:pre-wrap;word-break:break-all;flex:0 0 auto");
-      const listEl = h("div", "flex:0 1 auto;max-height:35%;overflow:auto;padding:5px 0");
+      // File list and comment list — inline (stacked around the diff) and rail (fill the
+      // rail) postures. Moves keep display intact (an error-hidden list must stay hidden).
+      const LIST_INLINE = "flex:0 1 auto;max-height:35%;overflow:auto;padding:5px 0";
+      const COMMENTS_INLINE = "flex:0 1 auto;max-height:30%;overflow:auto;border-top:1px solid var(--bd);padding:5px 0";
+      const RAIL_FILL = "flex:1 1 auto;min-height:0;overflow:auto;padding:5px 0";
+      const restyle = (el, css) => {
+        const display = el.style.display;
+        el.style.cssText = css;
+        el.style.display = display;
+      };
+      const listEl = h("div", LIST_INLINE);
       const diffEl = h("div", "flex:1 1 auto;min-height:0;overflow:auto;padding:8px 10px;border-top:1px solid var(--bd);font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.5;white-space:pre");
-      const commentsEl = h("div", "flex:0 1 auto;max-height:30%;overflow:auto;border-top:1px solid var(--bd);padding:5px 0");
+      const commentsEl = h("div", COMMENTS_INLINE);
       wrap.append(bar, errEl, listEl, diffEl, commentsEl);
       container.append(wrap);
+
+      // Rail ejection — the file list goes to the left rail, the comment list to the right
+      // rail, whenever their containers register; released containers put them back inline.
+      // No registered container (older core) = the inline layout stays.
+      const unbindFiles = bindRailSlot(vctx.viewId ?? null, "files", listEl, {
+        adopt: (el) => restyle(el, RAIL_FILL),
+        restore: (el) => {
+          restyle(el, LIST_INLINE);
+          wrap.insertBefore(el, diffEl);
+        },
+      });
+      const unbindComments = bindRailSlot(vctx.viewId ?? null, "comments", commentsEl, {
+        adopt: (el) => restyle(el, RAIL_FILL),
+        restore: (el) => {
+          restyle(el, COMMENTS_INLINE);
+          wrap.appendChild(el);
+        },
+      });
 
       const root = vctx.root;
       let target = null;
@@ -411,7 +474,11 @@ function mkView(app, git, deps, cleanups) {
           void render();
         }),
       ];
-      cleanups.set(container, () => { for (const s of subs) s.dispose(); });
+      cleanups.set(container, () => {
+        for (const s of subs) s.dispose();
+        unbindFiles();
+        unbindComments();
+      });
     },
     unmount(container) {
       cleanups.get(container)?.();
